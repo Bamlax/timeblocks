@@ -18,8 +18,16 @@ class VersionRecord {
 // 新版本请加在列表最前面
 
 const List<VersionRecord> appVersionHistory = [
+    VersionRecord(
+    version: '0.1.1',
+    date: '2025-12-25',
+    updates: [
+      '新建app图标',
+    ],
+    isLatest: true,
+  ),
   VersionRecord(
-    version: 'v0.1.0',
+    version: '0.1.0',
     date: '2025-12-24',
     updates: [
       '初始版发布',

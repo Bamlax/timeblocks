@@ -41,6 +41,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -90,3 +91,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+flutter_launcher_icons:
+  android: "ic_launcher" # 生成 Android 图标文件名
+  ios: true              # 是否同时生成 iOS 图标
+  image_path: "assets/icon/icon.png" # 你的图标路径
+  min_sdk_android: 21 # 建议设置，兼容性更好
+  
+  # --- 进阶：适配 Android 8.0+ 的自适应图标 (可选，推荐) ---
+  # 如果不配置下面这两行，图标可能会在部分手机上显得比较小或有白边
+  # adaptive_icon_background: "#ffffff" # 背景颜色 (或背景图片路径)
+  # adaptive_icon_foreground: "assets/icon/icon.png" # 前景图标
