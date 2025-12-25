@@ -18,6 +18,15 @@ class VersionRecord {
 // 新版本请加在列表最前面
 
 const List<VersionRecord> appVersionHistory = [
+      VersionRecord(
+    version: '0.2.0',
+    date: '2025-12-25',
+    updates: [
+      '新增合并功能',
+      '修复标签能左滑多个的问题',
+    ],
+    isLatest: true,
+  ),
     VersionRecord(
     version: '0.1.1',
     date: '2025-12-25',

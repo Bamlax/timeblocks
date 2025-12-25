@@ -3,6 +3,7 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import '../data_manager.dart';
 import '../models/project.dart';
 import 'project_entry_dialog.dart';
+import 'merge_dialog.dart';
 
 class EventManagementPage extends StatefulWidget {
   const EventManagementPage({super.key});
@@ -55,8 +56,6 @@ class _EventManagementPageState extends State<EventManagementPage> {
                 final project = displayProjects[index];
                 return ListTile(
                   key: Key(project.id),
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                   leading: Container(
                     width: 16, height: 16, 
@@ -75,7 +74,6 @@ class _EventManagementPageState extends State<EventManagementPage> {
             );
           }
 
-          // 【核心修复】将 ListView 包裹起来
           return SlidableAutoCloseBehavior(
             child: ListView.separated(
               itemCount: displayProjects.length,
@@ -85,11 +83,17 @@ class _EventManagementPageState extends State<EventManagementPage> {
                 
                 return Slidable(
                   key: Key(project.id),
-                  groupTag: 'project_list', // groupTag 保持不变
+                  groupTag: 'project_list',
                   endActionPane: ActionPane(
                     motion: const ScrollMotion(),
-                    extentRatio: 0.3,
+                    extentRatio: 0.45,
                     children: [
+                      SlidableAction(
+                        onPressed: (context) => _showMergeDialog(context, project, displayProjects),
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        icon: Icons.merge,
+                      ),
                       SlidableAction(
                         onPressed: (context) => _showEditDialog(context, project),
                         backgroundColor: Colors.blue,
@@ -123,7 +127,24 @@ class _EventManagementPageState extends State<EventManagementPage> {
     );
   }
 
-  // ... _showEditDialog 和 _showDeleteConfirm 方法保持不变 ...
+  void _showMergeDialog(BuildContext context, Project sourceProject, List<Project> allProjects) {
+    final targets = allProjects.where((p) => p.id != sourceProject.id).toList();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => MergeDialog<Project>(
+        title: '将 "${sourceProject.name}" 合并到...',
+        items: targets,
+        getName: (p) => p.name,
+        getLeading: (p) => Container(width: 12, height: 12, decoration: BoxDecoration(color: p.color, shape: BoxShape.circle)),
+        onSelected: (target) {
+          _dataManager.mergeProjects(sourceProject.id, target.id);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已合并到 ${target.name}')));
+        },
+      ),
+    );
+  }
+
   void _showEditDialog(BuildContext context, Project project) {
     showDialog(
       context: context,

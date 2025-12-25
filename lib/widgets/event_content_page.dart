@@ -3,6 +3,7 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import '../data_manager.dart';
 import '../models/project.dart';
 import '../models/task.dart';
+import 'merge_dialog.dart';
 
 class EventContentPage extends StatefulWidget {
   const EventContentPage({super.key});
@@ -30,7 +31,6 @@ class _EventContentPageState extends State<EventContentPage> {
             return const Center(child: Text("暂无事件内容，点击右下角添加"));
           }
           
-          // 【核心修复】将 ListView 包裹起来
           return SlidableAutoCloseBehavior(
             child: ListView.separated(
               itemCount: _dataManager.tasks.length,
@@ -42,11 +42,17 @@ class _EventContentPageState extends State<EventContentPage> {
 
                 return Slidable(
                   key: Key(task.id),
-                  groupTag: 'task_list', // groupTag 保持不变
+                  groupTag: 'task_list',
                   endActionPane: ActionPane(
                     motion: const ScrollMotion(),
-                    extentRatio: 0.3, 
+                    extentRatio: 0.45,
                     children: [
+                      SlidableAction(
+                        onPressed: (context) => _showMergeTaskDialog(context, task),
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        icon: Icons.merge,
+                      ),
                       SlidableAction(
                         onPressed: (context) => _showEditTaskDialog(context, task, validProjects),
                         backgroundColor: Colors.blue,
@@ -109,7 +115,30 @@ class _EventContentPageState extends State<EventContentPage> {
     );
   }
 
-  // ... _showAddTaskDialog 和 _showEditTaskDialog 方法保持不变 ...
+  void _showMergeTaskDialog(BuildContext context, Task sourceTask) {
+    final targets = _dataManager.tasks.where((t) => t.id != sourceTask.id).toList();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => MergeDialog<Task>(
+        title: '将 "${sourceTask.name}" 合并到...',
+        items: targets,
+        getName: (t) {
+          final p = _dataManager.getProjectById(t.projectId);
+          return "${t.name} (${p?.name ?? '未知'})";
+        },
+        getLeading: (t) {
+          final p = _dataManager.getProjectById(t.projectId);
+          return Container(width: 10, height: 10, decoration: BoxDecoration(color: p?.color ?? Colors.grey, shape: BoxShape.circle));
+        },
+        onSelected: (target) {
+          _dataManager.mergeTasks(sourceTask.id, target.id);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已合并到 ${target.name}')));
+        },
+      ),
+    );
+  }
+
   void _showAddTaskDialog(BuildContext context, List<Project> projects) {
     String name = "";
     Project? selectedProject = projects.isNotEmpty ? projects.first : null;
