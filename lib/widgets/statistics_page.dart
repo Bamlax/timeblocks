@@ -18,13 +18,12 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
   TimeRange _selectedRange = TimeRange.today;
   DateTimeRange? _customDateRange;
   
-  // 【新增】控制当前是显示饼图还是条形图
   bool _showPieChart = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   // --- 筛选逻辑 ---
@@ -102,7 +101,6 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
         title: const Text('统计'),
         centerTitle: true,
         actions: [
-          // 【新增】视图切换图标 (饼图/列表)
           IconButton(
             tooltip: _showPieChart ? "切换列表视图" : "切换饼图视图",
             icon: Icon(
@@ -116,7 +114,6 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
             },
           ),
           
-          // 日期选择
           PopupMenuButton<TimeRange>(
             icon: Row(
               children: [
@@ -153,6 +150,7 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
           tabs: const [
             Tab(text: "事件类别"),
             Tab(text: "事件内容"),
+            Tab(text: "标签"),
           ],
         ),
       ),
@@ -165,11 +163,16 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
               _StatView(
                 range: _getDateRange(), 
                 type: _StatType.project, 
-                showPieChart: _showPieChart // 传入视图状态
+                showPieChart: _showPieChart
               ),
               _StatView(
                 range: _getDateRange(), 
                 type: _StatType.task, 
+                showPieChart: _showPieChart
+              ),
+              _StatView(
+                range: _getDateRange(), 
+                type: _StatType.tag, 
                 showPieChart: _showPieChart
               ),
             ],
@@ -180,9 +183,8 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
   }
 }
 
-enum _StatType { project, task }
+enum _StatType { project, task, tag }
 
-// 数据模型类，方便传递
 class _StatItem {
   final String id;
   final String name;
@@ -233,11 +235,21 @@ class _StatView extends StatelessWidget {
           id = entry.project.id;
           name = entry.project.name;
           color = entry.project.color;
-        } else {
+        } else if (type == _StatType.task) {
           if (entry.task != null) {
             id = entry.task!.id;
             name = entry.task!.name;
             color = entry.project.color;
+          } else {
+            return; 
+          }
+        } else { // Tag
+          if (entry.tagId != null) {
+            id = entry.tagId!;
+            final tag = dataManager.getTagById(id);
+            name = tag?.name ?? "未知标签";
+            // 暂时给个占位色，后面排序后会重新赋值
+            color = Colors.blue; 
           } else {
             return; 
           }
@@ -263,8 +275,8 @@ class _StatView extends StatelessWidget {
       );
     }
 
-    // 2. 转换为 List 并排序
-    final List<_StatItem> items = durationMap.keys.map((id) {
+    // 2. 转换为 List 并排序 (按时长倒序)
+    List<_StatItem> items = durationMap.keys.map((id) {
       final int blocks = durationMap[id]!;
       final int minutes = blocks * 5;
       final double percentage = minutes / totalMinutesInRange;
@@ -277,13 +289,34 @@ class _StatView extends StatelessWidget {
       );
     }).toList();
 
-    // 按时长倒序
     items.sort((a, b) => b.minutes.compareTo(a.minutes));
 
-    // 3. 构建界面
+    // 3. 【修改点】如果是标签统计，按照排序结果，生成蓝色深浅渐变
+    if (type == _StatType.tag && items.isNotEmpty) {
+      items = List.generate(items.length, (index) {
+        final item = items[index];
+        
+        // 计算渐变：排名第一(index=0)最深，排名最后最浅
+        // 范围：Blue[900] -> Blue[100]
+        final double t = items.length > 1 ? index / (items.length - 1) : 0.0;
+        
+        // Color.lerp(a, b, t): 当t=0返回a，t=1返回b
+        // 所以我们从 深蓝 -> 浅蓝 插值
+        final Color gradientColor = Color.lerp(Colors.blue.shade900, Colors.blue.shade100, t)!;
+
+        return _StatItem(
+          id: item.id,
+          name: item.name,
+          color: gradientColor, // 覆盖原来的颜色
+          minutes: item.minutes,
+          percentage: item.percentage,
+        );
+      });
+    }
+
+    // 4. 构建界面
     return Column(
       children: [
-        // 顶部总时长
         Container(
           padding: const EdgeInsets.all(16),
           color: Colors.grey.shade50,
@@ -304,7 +337,6 @@ class _StatView extends StatelessWidget {
         ),
         const Divider(height: 1),
         
-        // 内容区域：根据 showPieChart 切换
         Expanded(
           child: showPieChart 
               ? _buildPieChartView(items)
@@ -314,7 +346,6 @@ class _StatView extends StatelessWidget {
     );
   }
 
-  // --- 视图 A: 条形图列表 ---
   Widget _buildBarListView(List<_StatItem> items) {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
@@ -356,11 +387,9 @@ class _StatView extends StatelessWidget {
     );
   }
 
-  // --- 视图 B: 饼图视图 (包含图表 + 图例列表) ---
   Widget _buildPieChartView(List<_StatItem> items) {
     return Column(
       children: [
-        // 1. 饼图区域
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 24),
           child: SizedBox(
@@ -372,7 +401,6 @@ class _StatView extends StatelessWidget {
           ),
         ),
         const Divider(),
-        // 2. 底部图例列表 (简单展示，不带进度条)
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -408,7 +436,6 @@ class _StatView extends StatelessWidget {
   }
 }
 
-// --- 手写饼图绘制器 (无需第三方库) ---
 class _PieChartPainter extends CustomPainter {
   final List<_StatItem> items;
 
@@ -418,11 +445,9 @@ class _PieChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = math.min(size.width, size.height) / 2;
-    
-    // 这是一个空心饼图 (Donut Chart) 还是实心？这里画实心
     final rect = Rect.fromCircle(center: center, radius: radius);
 
-    double startAngle = -math.pi / 2; // 从12点方向开始
+    double startAngle = -math.pi / 2; 
 
     for (var item in items) {
       final sweepAngle = 2 * math.pi * item.percentage;
@@ -432,7 +457,6 @@ class _PieChartPainter extends CustomPainter {
       
       canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
       
-      // 绘制分割线
       final borderPaint = Paint()
         ..style = PaintingStyle.stroke
         ..color = Colors.white
@@ -441,10 +465,6 @@ class _PieChartPainter extends CustomPainter {
 
       startAngle += sweepAngle;
     }
-    
-    // 中间挖个洞做成甜甜圈 (可选)
-    // final holeRadius = radius * 0.5;
-    // canvas.drawCircle(center, holeRadius, Paint()..color = Colors.white);
   }
 
   @override

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import '../data_manager.dart';
 import '../models/project.dart';
+import '../models/task.dart';
 
 class EventContentPage extends StatefulWidget {
   const EventContentPage({super.key});
@@ -28,42 +30,75 @@ class _EventContentPageState extends State<EventContentPage> {
             return const Center(child: Text("暂无事件内容，点击右下角添加"));
           }
           
-          return ListView.separated(
-            itemCount: _dataManager.tasks.length,
-            // 使用 Divider 作为分隔线，实现列表风格
-            separatorBuilder: (c, i) => const Divider(height: 1, indent: 16, endIndent: 16),
-            itemBuilder: (context, index) {
-              final task = _dataManager.tasks[index];
-              final parentProject = _dataManager.getProjectById(task.projectId);
+          // 【核心修复】将 ListView 包裹起来
+          return SlidableAutoCloseBehavior(
+            child: ListView.separated(
+              itemCount: _dataManager.tasks.length,
+              separatorBuilder: (c, i) => const Divider(height: 1, indent: 16, endIndent: 16),
+              itemBuilder: (context, index) {
+                final task = _dataManager.tasks[index];
+                final parentProject = _dataManager.getProjectById(task.projectId);
+                final Color projectColor = parentProject?.color ?? Colors.grey;
 
-              return Dismissible(
-                key: Key(task.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 20),
-                  color: Colors.red, // 删除背景色
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                onDismissed: (direction) {
-                  _dataManager.removeTask(task.id);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已删除 ${task.name}')),
-                  );
-                },
-                // 去掉了 Container 和 Decoration，直接使用 ListTile
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: CircleAvatar(
-                    backgroundColor: parentProject?.color ?? Colors.grey,
-                    radius: 8,
+                return Slidable(
+                  key: Key(task.id),
+                  groupTag: 'task_list', // groupTag 保持不变
+                  endActionPane: ActionPane(
+                    motion: const ScrollMotion(),
+                    extentRatio: 0.3, 
+                    children: [
+                      SlidableAction(
+                        onPressed: (context) => _showEditTaskDialog(context, task, validProjects),
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        icon: Icons.edit,
+                      ),
+                      SlidableAction(
+                        onPressed: (context) {
+                          _dataManager.removeTask(task.id);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('已删除 ${task.name}')),
+                          );
+                        },
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        icon: Icons.delete,
+                      ),
+                    ],
                   ),
-                  title: Text(task.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-                  subtitle: Text("所属项目: ${parentProject?.name ?? '未知'}", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                  trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
-                ),
-              );
-            },
+                  child: ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    leading: Container(
+                      width: 12, height: 12,
+                      decoration: BoxDecoration(
+                        color: projectColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    title: Text(task.name, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+                    subtitle: Row(
+                      children: [
+                        const Text("所属: ", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                        Container(
+                          width: 8, height: 8,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: projectColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Text(
+                          parentProject?.name ?? '未知',
+                          style: TextStyle(color: Colors.grey.shade700, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           );
         },
       ),
@@ -74,6 +109,7 @@ class _EventContentPageState extends State<EventContentPage> {
     );
   }
 
+  // ... _showAddTaskDialog 和 _showEditTaskDialog 方法保持不变 ...
   void _showAddTaskDialog(BuildContext context, List<Project> projects) {
     String name = "";
     Project? selectedProject = projects.isNotEmpty ? projects.first : null;
@@ -90,31 +126,23 @@ class _EventContentPageState extends State<EventContentPage> {
                 children: [
                   TextField(
                     autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: '内容名称',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: '内容名称', border: OutlineInputBorder()),
                     onChanged: (v) => name = v,
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<Project>(
                     value: selectedProject,
-                    decoration: const InputDecoration(
-                      labelText: '归属项目',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: projects.map((p) {
-                      return DropdownMenuItem(
-                        value: p,
-                        child: Row(
-                          children: [
-                            Container(width: 12, height: 12, color: p.color),
-                            const SizedBox(width: 8),
-                            Text(p.name),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+                    decoration: const InputDecoration(labelText: '归属项目', border: OutlineInputBorder()),
+                    items: projects.map((p) => DropdownMenuItem(
+                      value: p,
+                      child: Row(
+                        children: [
+                          Container(width: 12, height: 12, color: p.color),
+                          const SizedBox(width: 8),
+                          Text(p.name),
+                        ],
+                      ),
+                    )).toList(),
                     onChanged: (p) => setState(() => selectedProject = p),
                   ),
                 ],
@@ -129,6 +157,65 @@ class _EventContentPageState extends State<EventContentPage> {
                     }
                   },
                   child: const Text('创建'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showEditTaskDialog(BuildContext context, Task task, List<Project> projects) {
+    String name = task.name;
+    Project? selectedProject = projects.firstWhere(
+      (p) => p.id == task.projectId, 
+      orElse: () => projects.isNotEmpty ? projects.first : projects[0]
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('编辑事件内容'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: TextEditingController(text: name),
+                    decoration: const InputDecoration(labelText: '内容名称', border: OutlineInputBorder()),
+                    onChanged: (v) => name = v,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<Project>(
+                    value: selectedProject,
+                    decoration: const InputDecoration(labelText: '归属项目', border: OutlineInputBorder()),
+                    items: projects.map((p) => DropdownMenuItem(
+                      value: p,
+                      child: Row(
+                        children: [
+                          Container(width: 12, height: 12, color: p.color),
+                          const SizedBox(width: 8),
+                          Text(p.name),
+                        ],
+                      ),
+                    )).toList(),
+                    onChanged: (p) => setState(() => selectedProject = p),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+                ElevatedButton(
+                  onPressed: () {
+                    if (name.isNotEmpty && selectedProject != null) {
+                      _dataManager.updateTask(task.id, name, selectedProject!.id);
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text('保存'),
                 ),
               ],
             );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'event_content_page.dart';
 import 'event_management_page.dart';
+import 'tag_management_page.dart'; // 【新增】
 import 'version_history_page.dart';
 import 'statistics_page.dart';
 
@@ -26,7 +27,6 @@ class _AppDrawerState extends State<AppDrawer> {
       final info = await PackageInfo.fromPlatform();
       if (mounted) {
         setState(() {
-          // 如果获取为空 (Web端常见)，显示默认值
           _version = info.version.isNotEmpty ? info.version : "1.0.0";
         });
       }
@@ -71,7 +71,7 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: '统计',
                   subtitle: '查看时间分布',
                   onTap: () {
-                    Navigator.pop(context); // 关闭抽屉
+                    Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (c) => const StatisticsPage()),
@@ -104,6 +104,20 @@ class _AppDrawerState extends State<AppDrawer> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (c) => const EventContentPage()),
+                    );
+                  },
+                ),
+
+                // 【新增】标签管理入口
+                _buildMenuItem(
+                  context,
+                  icon: Icons.label,
+                  title: '标签',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (c) => const TagManagementPage()),
                     );
                   },
                 ),
@@ -178,7 +192,7 @@ class _AppDrawerState extends State<AppDrawer> {
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(context); // 关闭弹窗
+                Navigator.pop(context);
                 Navigator.push(
                   context, 
                   MaterialPageRoute(builder: (c) => const VersionHistoryPage())

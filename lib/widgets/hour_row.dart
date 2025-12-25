@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants.dart';
+import '../data_manager.dart';
 import '../models/project.dart';
 import '../models/time_entry.dart';
 
@@ -7,7 +8,6 @@ class HourRow extends StatelessWidget {
   final int hourIndex;
   final Map<int, TimeEntry> timeData;
   final Set<int> selectedMinutes;
-  // 删除 onSelect 回调，因为不由内部控制了
   final bool isCurrentHourRow;
   final DateTime now;
 
@@ -38,9 +38,8 @@ class HourRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 左侧：时间标签
           SizedBox(
-            width: 60,
+            width: 45, 
             child: Center(
               child: isNewDay
                   ? Text(
@@ -50,20 +49,19 @@ class HourRow extends StatelessWidget {
                         fontSize: 12,
                         color: Colors.blue.shade800,
                         fontWeight: FontWeight.bold,
-                        height: 1.2,
+                        height: 1.1,
                       ),
                     )
                   : Text(
                       "${currentHour.toString().padLeft(2, '0')}:00",
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: isCurrentHourRow ? Colors.black : Colors.grey.shade500,
                         fontWeight: isCurrentHourRow ? FontWeight.bold : FontWeight.w500,
                       ),
                     ),
             ),
           ),
-          // 右侧：纯展示网格 (移除 GestureDetector)
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -131,29 +129,69 @@ class HourRow extends StatelessWidget {
   List<Widget> _buildMergedProjectBlocks(int rowBaseMinute, double blockWidth) {
     List<Widget> blocks = [];
     int i = 0;
+    final DataManager dm = DataManager();
+
     while (i < 12) {
       final int currentMinute = rowBaseMinute + (i * 5);
       final TimeEntry? entry = timeData[currentMinute];
+      
       if (entry != null) {
         int j = i + 1;
         while (j < 12) {
           final int nextMinute = rowBaseMinute + (j * 5);
           final TimeEntry? nextEntry = timeData[nextMinute];
-          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) break;
+          // 只要 uniqueId 不同 (包括标签不同)，就会停止合并
+          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) {
+            break; 
+          }
           j++;
         }
+        
         final int blockCount = j - i;
+        final tag = dm.getTagById(entry.tagId);
+
         blocks.add(Positioned(
           left: i * blockWidth,
           top: 0, bottom: 0,
           width: blockCount * blockWidth,
           child: Container(
-            color: entry.project.color,
+            // 【核心修改】使用 BoxDecoration 添加背景色和白色右边框
+            decoration: BoxDecoration(
+              color: entry.project.color,
+              // 添加一条 1px 的白色右边框作为分割线
+              border: const Border(
+                right: BorderSide(color: Colors.white, width: 1.0),
+              ),
+            ),
             alignment: Alignment.center,
             child: blockCount > 1
-                ? Text(entry.displayName,
-                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black26, offset: Offset(0, 1))]),
-                    overflow: TextOverflow.ellipsis, maxLines: 1)
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        entry.displayName, 
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          shadows: [Shadow(blurRadius: 2, color: Colors.black26, offset: Offset(0, 1))]
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      if (tag != null)
+                        Text(
+                          "#${tag.name}",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 9,
+                            fontStyle: FontStyle.italic,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                    ],
+                  )
                 : null,
           ),
         ));

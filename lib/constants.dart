@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-const double kHourHeight = 60.0; // 行高
+const double kHourHeight = 35.0; // 行高
 final DateTime kAnchorDate = DateTime(1925, 1, 1); // 时间锚点
-const String kAppVersion = "1.0.0"; // 当前版本号
+const String kAppVersion = "0.0.1"; // 当前版本号
 
 // 默认调色盘
 final List<Color> kDefaultColorPalette = [
