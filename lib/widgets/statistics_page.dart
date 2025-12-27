@@ -29,7 +29,6 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
   // --- 筛选逻辑 ---
   DateTimeRange _getDateRange() {
     final now = DateTime.now();
-    // “今天”是指今天的00:00
     final today = DateTime(now.year, now.month, now.day);
 
     switch (_selectedRange) {
@@ -55,28 +54,15 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
         return DateTimeRange(start: today.subtract(const Duration(days: 6)), end: today.add(const Duration(days: 1)));
       case TimeRange.last30:
         return DateTimeRange(start: today.subtract(const Duration(days: 29)), end: today.add(const Duration(days: 1)));
-      
       case TimeRange.all:
-        // 【修改点 1】从第一条记录开始算，而不是 1925 年
         final dataManager = DataManager();
         if (dataManager.timeData.isEmpty) {
-          // 如果没有数据，默认显示今天
           return DateTimeRange(start: today, end: today.add(const Duration(days: 1)));
         }
-        
-        // 找到最小的 key (分钟索引)
         final int firstMinuteIndex = dataManager.timeData.keys.reduce(math.min);
-        // 转换为日期对象
         final DateTime firstRecordDate = kAnchorDate.add(Duration(minutes: firstMinuteIndex));
-        // 取当天的 00:00
         final DateTime start = DateTime(firstRecordDate.year, firstRecordDate.month, firstRecordDate.day);
-        
-        // 结束时间是明天0点 (包含今天)
-        // 如果想包含未来的规划，可以寻找 maxKey，这里暂定截止到“今天结束”
-        // 或者使用: final int lastMinuteIndex = dataManager.timeData.keys.reduce(math.max);
-        // 这里为了符合“有史以来”的语境，通常指到目前为止。
         return DateTimeRange(start: start, end: today.add(const Duration(days: 1)));
-
       case TimeRange.custom:
         return _customDateRange ?? DateTimeRange(start: today, end: today.add(const Duration(days: 1)));
     }
@@ -182,17 +168,20 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
             controller: _tabController,
             children: [
               _StatView(
-                range: _getDateRange(), 
+                range: _getDateRange(),
+                timeRangeType: _selectedRange,
                 type: _StatType.project, 
                 showPieChart: _showPieChart
               ),
               _StatView(
-                range: _getDateRange(), 
+                range: _getDateRange(),
+                timeRangeType: _selectedRange,
                 type: _StatType.task, 
                 showPieChart: _showPieChart
               ),
               _StatView(
-                range: _getDateRange(), 
+                range: _getDateRange(),
+                timeRangeType: _selectedRange,
                 type: _StatType.tag, 
                 showPieChart: _showPieChart
               ),
@@ -212,6 +201,7 @@ class _StatItem {
   final Color color;
   final int minutes;
   final double percentage;
+  final int previousMinutes;
 
   _StatItem({
     required this.id,
@@ -219,16 +209,51 @@ class _StatItem {
     required this.color,
     required this.minutes,
     required this.percentage,
+    required this.previousMinutes,
   });
 }
 
+// --- 辅助方法：获取上一周期 ---
+DateTimeRange? _calculatePreviousRange(TimeRange timeRangeType, DateTimeRange currentRange) {
+  if (timeRangeType == TimeRange.all || timeRangeType == TimeRange.custom) {
+    return null; 
+  }
+
+  final start = currentRange.start;
+  switch (timeRangeType) {
+    case TimeRange.today:
+      return DateTimeRange(start: start.subtract(const Duration(days: 1)), end: start);
+    case TimeRange.week:
+      return DateTimeRange(start: start.subtract(const Duration(days: 7)), end: start);
+    case TimeRange.month:
+      final prevStart = DateTime(start.year, start.month - 1, 1);
+      return DateTimeRange(start: prevStart, end: start);
+    case TimeRange.quarter:
+      final prevStart = DateTime(start.year, start.month - 3, 1);
+      return DateTimeRange(start: prevStart, end: start);
+    case TimeRange.year:
+      final prevStart = DateTime(start.year - 1, 1, 1);
+      return DateTimeRange(start: prevStart, end: start);
+    case TimeRange.last7:
+      return DateTimeRange(start: start.subtract(const Duration(days: 7)), end: start);
+    case TimeRange.last30:
+      return DateTimeRange(start: start.subtract(const Duration(days: 30)), end: start);
+    default:
+      return null;
+  }
+}
+
+// --- 主统计视图 ---
 class _StatView extends StatelessWidget {
   final DateTimeRange range;
+  final TimeRange timeRangeType;
   final _StatType type;
   final bool showPieChart;
 
   const _StatView({
+    super.key,
     required this.range, 
+    required this.timeRangeType,
     required this.type,
     required this.showPieChart,
   });
@@ -237,48 +262,62 @@ class _StatView extends StatelessWidget {
   Widget build(BuildContext context) {
     final DataManager dataManager = DataManager();
     final Map<String, int> durationMap = {};
+    final Map<String, int> prevDurationMap = {};
     final Map<String, Color> colorMap = {};
     final Map<String, String> nameMap = {};
     
     int totalMinutesInRange = 0;
 
-    // 1. 聚合数据
     final int startMin = range.start.difference(kAnchorDate).inMinutes;
     final int endMin = range.end.difference(kAnchorDate).inMinutes;
 
+    final prevRange = _calculatePreviousRange(timeRangeType, range);
+    int? prevStartMin;
+    int? prevEndMin;
+    if (prevRange != null) {
+      prevStartMin = prevRange.start.difference(kAnchorDate).inMinutes;
+      prevEndMin = prevRange.end.difference(kAnchorDate).inMinutes;
+    }
+
     dataManager.timeData.forEach((minuteIndex, entry) {
-      if (minuteIndex >= startMin && minuteIndex < endMin) {
-        String id;
-        String name;
-        Color color;
+      String id;
+      String name;
+      Color color;
 
-        if (type == _StatType.project) {
-          id = entry.project.id;
-          name = entry.project.name;
+      if (type == _StatType.project) {
+        id = entry.project.id;
+        name = entry.project.name;
+        color = entry.project.color;
+      } else if (type == _StatType.task) {
+        if (entry.task != null) {
+          id = entry.task!.id;
+          name = entry.task!.name;
           color = entry.project.color;
-        } else if (type == _StatType.task) {
-          if (entry.task != null) {
-            id = entry.task!.id;
-            name = entry.task!.name;
-            color = entry.project.color;
-          } else {
-            return; 
-          }
-        } else { // Tag
-          if (entry.tagId != null) {
-            id = entry.tagId!;
-            final tag = dataManager.getTagById(id);
-            name = tag?.name ?? "未知标签";
-            color = Colors.blue; 
-          } else {
-            return; 
-          }
+        } else {
+          return; 
         }
+      } else { // Tag
+        if (entry.tagId != null) {
+          id = entry.tagId!;
+          final tag = dataManager.getTagById(id);
+          name = tag?.name ?? "未知标签";
+          color = Colors.blue; 
+        } else {
+          return; 
+        }
+      }
 
-        durationMap[id] = (durationMap[id] ?? 0) + 1; // 1 block = 5 mins
+      // 统计当前
+      if (minuteIndex >= startMin && minuteIndex < endMin) {
+        durationMap[id] = (durationMap[id] ?? 0) + 1;
         colorMap[id] = color;
         nameMap[id] = name;
         totalMinutesInRange += 5; 
+      }
+
+      // 统计上期
+      if (prevStartMin != null && prevEndMin != null && minuteIndex >= prevStartMin && minuteIndex < prevEndMin) {
+        prevDurationMap[id] = (prevDurationMap[id] ?? 0) + 1;
       }
     });
 
@@ -295,23 +334,25 @@ class _StatView extends StatelessWidget {
       );
     }
 
-    // 2. 转换为 List 并排序
     List<_StatItem> items = durationMap.keys.map((id) {
       final int blocks = durationMap[id]!;
+      final int prevBlocks = prevDurationMap[id] ?? 0;
       final int minutes = blocks * 5;
+      final int prevMinutes = prevBlocks * 5;
       final double percentage = minutes / totalMinutesInRange;
+      
       return _StatItem(
         id: id,
         name: nameMap[id]!,
         color: colorMap[id]!,
         minutes: minutes,
         percentage: percentage,
+        previousMinutes: prevMinutes,
       );
     }).toList();
 
     items.sort((a, b) => b.minutes.compareTo(a.minutes));
 
-    // 3. 标签特殊着色逻辑 (蓝渐变)
     if (type == _StatType.tag && items.isNotEmpty) {
       items = List.generate(items.length, (index) {
         final item = items[index];
@@ -323,17 +364,16 @@ class _StatView extends StatelessWidget {
           color: gradientColor,
           minutes: item.minutes,
           percentage: item.percentage,
+          previousMinutes: item.previousMinutes,
         );
       });
     }
 
-    // 计算天数 (用于列表项的日均计算)
     final int days = range.duration.inDays;
 
-    // 4. 构建界面
     return Column(
       children: [
-        // 顶部总时长区域 (移除日均)
+        // 顶部总时长
         Container(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
           color: Colors.grey.shade50,
@@ -350,84 +390,274 @@ class _StatView extends StatelessWidget {
                 ],
               ),
             ),
-            // 【修改点 2】移除了这里的“日均”显示代码
           ),
         ),
         const Divider(height: 1),
         
         Expanded(
           child: showPieChart 
-              ? _buildPieChartView(items, days) 
-              : _buildBarListView(items, days),
+              ? _PieChartView(items: items, days: days, type: type, timeRangeType: timeRangeType, range: range, showPieChart: showPieChart) 
+              : _BarListView(items: items, days: days, type: type, timeRangeType: timeRangeType, range: range, showPieChart: showPieChart),
         ),
       ],
     );
   }
+}
 
-  Widget _buildBarListView(List<_StatItem> items, int days) {
+// --- 项目详情统计页面 ---
+class ProjectDetailStatisticsPage extends StatelessWidget {
+  final String projectId;
+  final String projectName;
+  final Color projectColor;
+  final DateTimeRange range;
+  final TimeRange timeRangeType; // 新增
+  final bool showPieChart;
+
+  const ProjectDetailStatisticsPage({
+    super.key,
+    required this.projectId,
+    required this.projectName,
+    required this.projectColor,
+    required this.range,
+    required this.timeRangeType,
+    required this.showPieChart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final DataManager dataManager = DataManager();
+    final Map<String, int> durationMap = {};
+    final Map<String, int> prevDurationMap = {}; // 上期数据
+    final Map<String, String> nameMap = {};
+    
+    int totalProjectMinutes = 0;
+
+    final int startMin = range.start.difference(kAnchorDate).inMinutes;
+    final int endMin = range.end.difference(kAnchorDate).inMinutes;
+
+    final prevRange = _calculatePreviousRange(timeRangeType, range);
+    int? prevStartMin;
+    int? prevEndMin;
+    if (prevRange != null) {
+      prevStartMin = prevRange.start.difference(kAnchorDate).inMinutes;
+      prevEndMin = prevRange.end.difference(kAnchorDate).inMinutes;
+    }
+
+    dataManager.timeData.forEach((minuteIndex, entry) {
+      // 筛选当前项目
+      if (entry.project.id == projectId) {
+        final String taskId = entry.task?.id ?? "uncategorized";
+        final String taskName = entry.task?.name ?? "（无内容）";
+
+        // 当前周期
+        if (minuteIndex >= startMin && minuteIndex < endMin) {
+          durationMap[taskId] = (durationMap[taskId] ?? 0) + 1;
+          nameMap[taskId] = taskName;
+          totalProjectMinutes += 5;
+        }
+
+        // 上个周期
+        if (prevStartMin != null && prevEndMin != null && minuteIndex >= prevStartMin && minuteIndex < prevEndMin) {
+          prevDurationMap[taskId] = (prevDurationMap[taskId] ?? 0) + 1;
+        }
+      }
+    });
+
+    if (durationMap.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text(projectName)),
+        body: const Center(child: Text("该项目在选定时间内无记录")),
+      );
+    }
+
+    List<_StatItem> items = durationMap.keys.map((id) {
+      final int blocks = durationMap[id]!;
+      final int prevBlocks = prevDurationMap[id] ?? 0;
+      final int minutes = blocks * 5;
+      final int prevMinutes = prevBlocks * 5;
+      final double percentage = minutes / totalProjectMinutes;
+      
+      return _StatItem(
+        id: id,
+        name: nameMap[id]!,
+        color: Colors.transparent, // 占位
+        minutes: minutes,
+        percentage: percentage,
+        previousMinutes: prevMinutes,
+      );
+    }).toList();
+
+    items.sort((a, b) => b.minutes.compareTo(a.minutes));
+
+    // 详情页颜色渐变
+    if (items.isNotEmpty) {
+      items = List.generate(items.length, (index) {
+        final item = items[index];
+        final double t = items.length > 1 ? index / (items.length - 1) : 0.0;
+        final Color gradientColor = Color.lerp(projectColor, projectColor.withOpacity(0.3), t)!;
+        
+        return _StatItem(
+          id: item.id,
+          name: item.name,
+          color: gradientColor,
+          minutes: item.minutes,
+          percentage: item.percentage,
+          previousMinutes: item.previousMinutes,
+        );
+      });
+    }
+
+    final int days = range.duration.inDays;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(projectName),
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          // 详情页这里去掉了顶部的总览面板
+          Expanded(
+            child: showPieChart
+                ? _PieChartView(items: items, days: days)
+                : _BarListView(items: items, days: days),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- 复用组件 ---
+
+class _BarListView extends StatelessWidget {
+  final List<_StatItem> items;
+  final int days;
+  final _StatType? type; // 可选，用于判断点击事件
+  final TimeRange? timeRangeType;
+  final DateTimeRange? range;
+  final bool? showPieChart;
+
+  const _BarListView({
+    required this.items, 
+    required this.days, 
+    this.type,
+    this.timeRangeType,
+    this.range,
+    this.showPieChart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (c, i) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final item = items[index];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // 总时长
-                    Text(_formatDuration(item.minutes), style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w600)),
-                    // 列表项日均 (保留)
-                    if (days > 1) 
-                      Text(
-                        "日均: ${_formatDuration(item.minutes ~/ days)}",
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-                      ),
-                  ],
+        // 只有在主页面且类型为 Project 时才允许点击
+        final bool canTap = type == _StatType.project && timeRangeType != null && range != null && showPieChart != null;
+
+        return InkWell(
+          onTap: canTap ? () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ProjectDetailStatisticsPage(
+                  projectId: item.id,
+                  projectName: item.name,
+                  projectColor: item.color,
+                  range: range!,
+                  timeRangeType: timeRangeType!,
+                  showPieChart: showPieChart!,
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: item.percentage,
-                backgroundColor: item.color.withOpacity(0.1),
-                color: item.color,
-                minHeight: 12,
               ),
-            ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                "${(item.percentage * 100).toStringAsFixed(1)}%",
-                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+            );
+          } : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      if (canTap) const Icon(Icons.keyboard_arrow_right, size: 16, color: Colors.grey),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(_formatDuration(item.minutes), style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w600)),
+                      if (days > 1) 
+                        Text("日均: ${_formatDuration(item.minutes ~/ days)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    ],
+                  ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: item.percentage,
+                  backgroundColor: item.color.withOpacity(0.1),
+                  color: item.color,
+                  minHeight: 12,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox(), // Spacer
+                  Row(
+                    children: [
+                      // 显示对比
+                      _ComparisonWidget(item: item),
+                      const SizedBox(width: 8),
+                      Text(
+                        "${(item.percentage * 100).toStringAsFixed(1)}%",
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
         );
       },
     );
   }
+}
 
-  Widget _buildPieChartView(List<_StatItem> items, int days) {
+class _PieChartView extends StatelessWidget {
+  final List<_StatItem> items;
+  final int days;
+  final _StatType? type;
+  final TimeRange? timeRangeType;
+  final DateTimeRange? range;
+  final bool? showPieChart;
+
+  const _PieChartView({
+    required this.items, 
+    required this.days,
+    this.type,
+    this.timeRangeType,
+    this.range,
+    this.showPieChart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 24),
           child: SizedBox(
-            height: 200,
-            width: 200,
-            child: CustomPaint(
-              painter: _PieChartPainter(items),
-            ),
+            height: 200, width: 200,
+            child: CustomPaint(painter: _PieChartPainter(items)),
           ),
         ),
         const Divider(),
@@ -438,28 +668,41 @@ class _StatView extends StatelessWidget {
             separatorBuilder: (c, i) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final item = items[index];
+              final bool canTap = type == _StatType.project && timeRangeType != null && range != null && showPieChart != null;
+
               return ListTile(
                 dense: true,
-                leading: Container(
-                  width: 12, 
-                  height: 12, 
-                  decoration: BoxDecoration(color: item.color, shape: BoxShape.circle),
+                onTap: canTap ? () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ProjectDetailStatisticsPage(
+                        projectId: item.id,
+                        projectName: item.name,
+                        projectColor: item.color,
+                        range: range!,
+                        timeRangeType: timeRangeType!,
+                        showPieChart: showPieChart!,
+                      ),
+                    ),
+                  );
+                } : null,
+                leading: Container(width: 12, height: 12, decoration: BoxDecoration(color: item.color, shape: BoxShape.circle)),
+                title: Row(
+                  children: [
+                    Text(item.name),
+                    if (canTap) const Icon(Icons.keyboard_arrow_right, size: 14, color: Colors.grey),
+                  ],
                 ),
-                title: Text(item.name),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      "${_formatDuration(item.minutes)}  (${(item.percentage * 100).toStringAsFixed(1)}%)",
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    // 列表项日均 (保留)
+                    Text("${_formatDuration(item.minutes)}  (${(item.percentage * 100).toStringAsFixed(1)}%)", style: const TextStyle(fontSize: 12)),
                     if (days > 1)
-                      Text(
-                        "日均: ${_formatDuration(item.minutes ~/ days)}",
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-                      ),
+                      Text("日均: ${_formatDuration(item.minutes ~/ days)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    if (item.previousMinutes > 0)
+                      _ComparisonWidget(item: item, fontSize: 9),
                   ],
                 ),
               );
@@ -469,46 +712,74 @@ class _StatView extends StatelessWidget {
       ],
     );
   }
+}
 
-  String _formatDuration(int minutes) {
-    final int h = minutes ~/ 60;
-    final int m = minutes % 60;
-    if (h > 0) return "${h}h ${m}m";
-    return "${m}m";
+class _ComparisonWidget extends StatelessWidget {
+  final _StatItem item;
+  final double fontSize;
+
+  const _ComparisonWidget({required this.item, this.fontSize = 10});
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.previousMinutes == 0) return const SizedBox.shrink();
+
+    final int diff = item.minutes - item.previousMinutes;
+    if (diff == 0) {
+      return Text("持平", style: TextStyle(fontSize: fontSize, color: Colors.grey));
+    }
+
+    final bool isIncrease = diff > 0;
+    final double percentChange = (diff.abs() / item.previousMinutes);
+    String percentText = (percentChange * 100).toStringAsFixed(0);
+    if (percentChange > 9.99) percentText = ">999";
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isIncrease ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+          size: fontSize + 4,
+          color: isIncrease ? Colors.green : Colors.red,
+        ),
+        Text(
+          "$percentText%",
+          style: TextStyle(
+            fontSize: fontSize,
+            color: isIncrease ? Colors.green : Colors.red,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
+}
+
+String _formatDuration(int minutes) {
+  final int h = minutes ~/ 60;
+  final int m = minutes % 60;
+  if (h > 0) return "${h}h ${m}m";
+  return "${m}m";
 }
 
 class _PieChartPainter extends CustomPainter {
   final List<_StatItem> items;
-
   _PieChartPainter(this.items);
-
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = math.min(size.width, size.height) / 2;
     final rect = Rect.fromCircle(center: center, radius: radius);
-
     double startAngle = -math.pi / 2; 
-
     for (var item in items) {
       final sweepAngle = 2 * math.pi * item.percentage;
-      final paint = Paint()
-        ..style = PaintingStyle.fill
-        ..color = item.color;
-      
+      final paint = Paint()..style = PaintingStyle.fill..color = item.color;
       canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
-      
-      final borderPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..color = Colors.white
-        ..strokeWidth = 2.0;
+      final borderPaint = Paint()..style = PaintingStyle.stroke..color = Colors.white..strokeWidth = 2.0;
       canvas.drawArc(rect, startAngle, sweepAngle, true, borderPaint);
-
       startAngle += sweepAngle;
     }
   }
-
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
