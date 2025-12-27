@@ -23,6 +23,8 @@ const List<VersionRecord> appVersionHistory = [
     date: '2025-12-27',
     updates: [
       '新增撤回功能',
+      '新增事件的详细内容的统计',
+      '新增时长对比',
     ],
     isLatest: false,
   ),
