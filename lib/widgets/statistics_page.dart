@@ -29,6 +29,7 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
   // --- 筛选逻辑 ---
   DateTimeRange _getDateRange() {
     final now = DateTime.now();
+    // “今天”是指今天的00:00
     final today = DateTime(now.year, now.month, now.day);
 
     switch (_selectedRange) {
@@ -54,8 +55,28 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
         return DateTimeRange(start: today.subtract(const Duration(days: 6)), end: today.add(const Duration(days: 1)));
       case TimeRange.last30:
         return DateTimeRange(start: today.subtract(const Duration(days: 29)), end: today.add(const Duration(days: 1)));
+      
       case TimeRange.all:
-        return DateTimeRange(start: kAnchorDate, end: today.add(const Duration(days: 36500)));
+        // 【修改点 1】从第一条记录开始算，而不是 1925 年
+        final dataManager = DataManager();
+        if (dataManager.timeData.isEmpty) {
+          // 如果没有数据，默认显示今天
+          return DateTimeRange(start: today, end: today.add(const Duration(days: 1)));
+        }
+        
+        // 找到最小的 key (分钟索引)
+        final int firstMinuteIndex = dataManager.timeData.keys.reduce(math.min);
+        // 转换为日期对象
+        final DateTime firstRecordDate = kAnchorDate.add(Duration(minutes: firstMinuteIndex));
+        // 取当天的 00:00
+        final DateTime start = DateTime(firstRecordDate.year, firstRecordDate.month, firstRecordDate.day);
+        
+        // 结束时间是明天0点 (包含今天)
+        // 如果想包含未来的规划，可以寻找 maxKey，这里暂定截止到“今天结束”
+        // 或者使用: final int lastMinuteIndex = dataManager.timeData.keys.reduce(math.max);
+        // 这里为了符合“有史以来”的语境，通常指到目前为止。
+        return DateTimeRange(start: start, end: today.add(const Duration(days: 1)));
+
       case TimeRange.custom:
         return _customDateRange ?? DateTimeRange(start: today, end: today.add(const Duration(days: 1)));
     }
@@ -248,7 +269,6 @@ class _StatView extends StatelessWidget {
             id = entry.tagId!;
             final tag = dataManager.getTagById(id);
             name = tag?.name ?? "未知标签";
-            // 暂时给个占位色，后面排序后会重新赋值
             color = Colors.blue; 
           } else {
             return; 
@@ -275,7 +295,7 @@ class _StatView extends StatelessWidget {
       );
     }
 
-    // 2. 转换为 List 并排序 (按时长倒序)
+    // 2. 转换为 List 并排序
     List<_StatItem> items = durationMap.keys.map((id) {
       final int blocks = durationMap[id]!;
       final int minutes = blocks * 5;
@@ -291,34 +311,31 @@ class _StatView extends StatelessWidget {
 
     items.sort((a, b) => b.minutes.compareTo(a.minutes));
 
-    // 3. 【修改点】如果是标签统计，按照排序结果，生成蓝色深浅渐变
+    // 3. 标签特殊着色逻辑 (蓝渐变)
     if (type == _StatType.tag && items.isNotEmpty) {
       items = List.generate(items.length, (index) {
         final item = items[index];
-        
-        // 计算渐变：排名第一(index=0)最深，排名最后最浅
-        // 范围：Blue[900] -> Blue[100]
         final double t = items.length > 1 ? index / (items.length - 1) : 0.0;
-        
-        // Color.lerp(a, b, t): 当t=0返回a，t=1返回b
-        // 所以我们从 深蓝 -> 浅蓝 插值
         final Color gradientColor = Color.lerp(Colors.blue.shade900, Colors.blue.shade100, t)!;
-
         return _StatItem(
           id: item.id,
           name: item.name,
-          color: gradientColor, // 覆盖原来的颜色
+          color: gradientColor,
           minutes: item.minutes,
           percentage: item.percentage,
         );
       });
     }
 
+    // 计算天数 (用于列表项的日均计算)
+    final int days = range.duration.inDays;
+
     // 4. 构建界面
     return Column(
       children: [
+        // 顶部总时长区域 (移除日均)
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
           color: Colors.grey.shade50,
           width: double.infinity,
           child: Center(
@@ -333,20 +350,21 @@ class _StatView extends StatelessWidget {
                 ],
               ),
             ),
+            // 【修改点 2】移除了这里的“日均”显示代码
           ),
         ),
         const Divider(height: 1),
         
         Expanded(
           child: showPieChart 
-              ? _buildPieChartView(items)
-              : _buildBarListView(items),
+              ? _buildPieChartView(items, days) 
+              : _buildBarListView(items, days),
         ),
       ],
     );
   }
 
-  Widget _buildBarListView(List<_StatItem> items) {
+  Widget _buildBarListView(List<_StatItem> items, int days) {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
@@ -360,7 +378,19 @@ class _StatView extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text(_formatDuration(item.minutes), style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // 总时长
+                    Text(_formatDuration(item.minutes), style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w600)),
+                    // 列表项日均 (保留)
+                    if (days > 1) 
+                      Text(
+                        "日均: ${_formatDuration(item.minutes ~/ days)}",
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                      ),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 6),
@@ -387,7 +417,7 @@ class _StatView extends StatelessWidget {
     );
   }
 
-  Widget _buildPieChartView(List<_StatItem> items) {
+  Widget _buildPieChartView(List<_StatItem> items, int days) {
     return Column(
       children: [
         Padding(
@@ -416,9 +446,21 @@ class _StatView extends StatelessWidget {
                   decoration: BoxDecoration(color: item.color, shape: BoxShape.circle),
                 ),
                 title: Text(item.name),
-                trailing: Text(
-                  "${_formatDuration(item.minutes)}  (${(item.percentage * 100).toStringAsFixed(1)}%)",
-                  style: const TextStyle(fontSize: 12),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "${_formatDuration(item.minutes)}  (${(item.percentage * 100).toStringAsFixed(1)}%)",
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    // 列表项日均 (保留)
+                    if (days > 1)
+                      Text(
+                        "日均: ${_formatDuration(item.minutes ~/ days)}",
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                      ),
+                  ],
                 ),
               );
             },

@@ -57,8 +57,15 @@ class _HomePageState extends State<HomePage> {
   
   // 选中的分钟集合
   final Set<int> _selectedMinutes = {};
+  
+  // 拖拽起点
   int? _dragStartIndex;
   
+  // --- 撤销功能相关变量 ---
+  Map<int, TimeEntry?>? _undoSnapshot; // 记录修改前的数据
+  bool _showUndoButton = false;        // 是否显示撤销按钮
+  Timer? _undoHideTimer;               // 2秒倒计时器
+
   late ScrollController _scrollController;
   Timer? _timer;
   final GlobalKey _listViewKey = GlobalKey();
@@ -82,6 +89,7 @@ class _HomePageState extends State<HomePage> {
     _dataManager.removeListener(_onDataChanged);
     _scrollController.dispose();
     _timer?.cancel();
+    _undoHideTimer?.cancel();
     super.dispose();
   }
 
@@ -106,9 +114,7 @@ class _HomePageState extends State<HomePage> {
     final RenderBox? renderBox = _listViewKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return null;
     
-    // 【重要】必须与 HourRow 保持一致
     const double timeLabelWidth = 45.0; 
-    
     if (localPosition.dx <= timeLabelWidth) return null;
 
     final double gridX = localPosition.dx - timeLabelWidth;
@@ -127,17 +133,63 @@ class _HomePageState extends State<HomePage> {
     return hourIndex * 60 + blockIndex * 5;
   }
 
-  // --- 手势处理逻辑 ---
+  // --- 撤销逻辑 ---
+
+  // 1. 记录当前选区的数据快照
+  void _recordUndoSnapshot() {
+    _undoSnapshot = {};
+    for (var index in _selectedMinutes) {
+      _undoSnapshot![index] = _dataManager.timeData[index]; // 记录引用
+    }
+  }
+
+  // 2. 显示撤销按钮，并启动定时器
+  void _showUndo() {
+    setState(() {
+      _showUndoButton = true;
+    });
+    
+    // 重置定时器
+    _undoHideTimer?.cancel();
+    _undoHideTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _showUndoButton = false;
+          _undoSnapshot = null; // 超时清除快照
+        });
+      }
+    });
+  }
+
+  // 3. 执行撤销
+  void _performUndo() {
+    if (_undoSnapshot != null) {
+      // 恢复数据
+      _dataManager.batchUpdate(_undoSnapshot!);
+      
+      setState(() {
+        _showUndoButton = false;
+        _undoSnapshot = null;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("已撤销更改"), 
+          duration: Duration(milliseconds: 600),
+          behavior: SnackBarBehavior.floating,
+        )
+      );
+    }
+  }
+
+  // --- 手势与应用逻辑 ---
 
   void _handleTap(Offset localPosition) {
     final int? minute = _calculateMinuteFromOffset(localPosition);
-    
-    // 点击了左侧标签或空白区域 -> 清除选择
     if (minute == null) {
       _clearSelection();
       return;
     }
-
     setState(() {
       if (_selectedMinutes.contains(minute)) {
         _selectedMinutes.remove(minute);
@@ -158,9 +210,7 @@ class _HomePageState extends State<HomePage> {
         _selectedMinutes.add(currentMinute);
       } else {
         if (_dragStartIndex == null) return;
-        
         _selectedMinutes.clear(); 
-        
         int start = _dragStartIndex!;
         int end = currentMinute;
         if (start > end) {
@@ -186,34 +236,40 @@ class _HomePageState extends State<HomePage> {
   void _applyEntry(Project? project, [Task? task]) {
     if (_selectedMinutes.isEmpty) return;
     
+    // 1. 记录快照
+    _recordUndoSnapshot();
+
+    // 2. 执行更新
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       if (project == null) {
-        updates[index] = null; // 清除
+        updates[index] = null;
       } else {
-        // 创建新 Entry，默认无 tag
         updates[index] = TimeEntry(project: project, task: task);
       }
     }
-    
     _dataManager.batchUpdate(updates);
     
+    // 3. 清除选区并显示撤回
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    _showUndo();
   }
 
-  // 【新增】应用标签
+  // 应用标签
   void _applyTag(String? tagId) {
     if (_selectedMinutes.isEmpty) return;
 
+    // 1. 记录快照
+    _recordUndoSnapshot();
+
+    // 2. 执行更新
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       final existingEntry = _dataManager.timeData[index];
-      // 只有当该位置已经有项目时，才允许打标签
       if (existingEntry != null) {
-        // copyWith 是在 TimeEntry 模型中定义的方法
         updates[index] = existingEntry.copyWith(tagId: tagId, clearTag: tagId == null);
       }
     }
@@ -222,19 +278,19 @@ class _HomePageState extends State<HomePage> {
       _dataManager.batchUpdate(updates);
     }
     
+    // 3. 清除选区并显示撤回
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    _showUndo();
   }
 
-  // 【新增】显示标签选择菜单
   void _showTagSelector() {
     if (_dataManager.tags.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先在侧边栏创建标签")));
       return;
     }
-
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -245,7 +301,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Text("选择标签", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const Divider(),
-              Expanded( // 如果标签多，允许滚动
+              Expanded(
                 child: ListView(
                   shrinkWrap: true,
                   children: [
@@ -302,7 +358,7 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Stack(
         children: [
-          // 点击空白处 (Body 区域) 清除选择
+          // 1. 主体内容 (网格 + 列表)
           GestureDetector(
             onTap: _clearSelection, 
             behavior: HitTestBehavior.translucent,
@@ -405,7 +461,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // 底部弹出操作栏
+          // 2. 底部弹出：选择操作栏
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
@@ -427,10 +483,9 @@ class _HomePageState extends State<HomePage> {
                     "已选 ${_selectedMinutes.length * 5} 分钟",
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  
                   const SizedBox(width: 16),
                   
-                  // 【新增】标签按钮
+                  // 标签按钮
                   TextButton.icon(
                     onPressed: _showTagSelector,
                     icon: const Icon(Icons.label_outline, size: 20),
@@ -440,6 +495,7 @@ class _HomePageState extends State<HomePage> {
 
                   const Spacer(),
                   
+                  // 清除按钮
                   ElevatedButton.icon(
                     onPressed: () => _applyEntry(null),
                     icon: const Icon(Icons.cleaning_services, size: 16),
@@ -453,6 +509,24 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               ),
+            ),
+          ),
+
+          // 3. 底部弹出：撤销按钮 (右下角)
+          // 只有当没有选区，且 _showUndoButton 为 true 时显示
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.elasticOut,
+            right: 20,
+            // 如果有选区操作栏，撤销按钮藏起来，否则显示
+            bottom: (!hasSelection && _showUndoButton) ? 30 : -80, 
+            child: FloatingActionButton.extended(
+              onPressed: _performUndo,
+              icon: const Icon(Icons.undo),
+              label: const Text("撤回"),
+              backgroundColor: Colors.black87,
+              foregroundColor: Colors.white,
+              elevation: 4,
             ),
           ),
         ],

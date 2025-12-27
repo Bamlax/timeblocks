@@ -18,6 +18,14 @@ class VersionRecord {
 // 新版本请加在列表最前面
 
 const List<VersionRecord> appVersionHistory = [
+    VersionRecord(
+    version: '0.3.0',
+    date: '2025-12-27',
+    updates: [
+      '新增撤回功能',
+    ],
+    isLatest: false,
+  ),
       VersionRecord(
     version: '0.2.0',
     date: '2025-12-25',
@@ -25,7 +33,7 @@ const List<VersionRecord> appVersionHistory = [
       '新增合并功能',
       '修复标签能左滑多个的问题',
     ],
-    isLatest: true,
+    isLatest: false,
   ),
     VersionRecord(
     version: '0.1.1',
@@ -33,7 +41,7 @@ const List<VersionRecord> appVersionHistory = [
     updates: [
       '新建app图标',
     ],
-    isLatest: true,
+    isLatest: false,
   ),
   VersionRecord(
     version: '0.1.0',
@@ -41,7 +49,7 @@ const List<VersionRecord> appVersionHistory = [
     updates: [
       '初始版发布',
     ],
-    isLatest: true,
+    isLatest: false,
   ),
   // 示例旧版本 (以后有新版本时，把上面的 isLatest 改为 false，新加一个在最上面)
   /*
