@@ -19,6 +19,14 @@ class VersionRecord {
 
 const List<VersionRecord> appVersionHistory = [
     VersionRecord(
+    version: '0.3.1',
+    date: '2025-12-29',
+    updates: [
+      '修复可以重复添加事件，事件内容和标签的bug',
+    ],
+    isLatest: false,
+  ),
+    VersionRecord(
     version: '0.3.0',
     date: '2025-12-27',
     updates: [

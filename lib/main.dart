@@ -534,21 +534,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSimpleAddButton() {
+    Widget _buildSimpleAddButton() {
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
-        onTap: () => showDialog(
-          context: context,
-          builder: (c) => ProjectEntryDialog(
-            title: '新增事件',
-            confirmText: '添加',
-            onSubmit: (name, color) {
-              _dataManager.addProject(name, color);
-            },
-          ),
-        ),
+        onTap: () {
+          // 【修改点】获取所有现有项目名称
+          final existingNames = _dataManager.projects
+              .where((p) => p.id != 'clear')
+              .map((p) => p.name)
+              .toList();
+
+          showDialog(
+            context: context,
+            builder: (c) => ProjectEntryDialog(
+              title: '新增事件',
+              confirmText: '添加',
+              existingNames: existingNames, // 传入查重列表
+              onSubmit: (name, color) {
+                _dataManager.addProject(name, color);
+              },
+            ),
+          );
+        },
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: double.infinity,

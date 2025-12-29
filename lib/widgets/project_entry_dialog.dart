@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import '../constants.dart';
-import 'color_picker.dart'; // 确保你之前创建了 color_picker.dart
+import 'color_picker.dart';
 
 class ProjectEntryDialog extends StatefulWidget {
   final String? initialName;
   final Color? initialColor;
   final String title;
   final String confirmText;
+  final List<String> existingNames; // 【新增】已存在的名称列表
   final Function(String name, Color color) onSubmit;
 
   const ProjectEntryDialog({
@@ -15,6 +16,7 @@ class ProjectEntryDialog extends StatefulWidget {
     this.initialColor,
     this.title = '新增事件',
     this.confirmText = '添加',
+    this.existingNames = const [], // 默认为空
     required this.onSubmit,
   });
 
@@ -26,6 +28,7 @@ class _ProjectEntryDialogState extends State<ProjectEntryDialog> {
   late TextEditingController _nameController;
   late Color _selectedColor;
   bool _isCustomMode = false;
+  String? _errorText; // 【新增】错误提示文字
 
   @override
   void initState() {
@@ -38,6 +41,25 @@ class _ProjectEntryDialogState extends State<ProjectEntryDialog> {
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  // 校验逻辑
+  void _validateAndSubmit() {
+    final name = _nameController.text.trim();
+    
+    if (name.isEmpty) {
+      setState(() => _errorText = "名称不能为空");
+      return;
+    }
+
+    // 检查重复 (忽略大小写? 这里暂定严格匹配)
+    if (widget.existingNames.contains(name)) {
+      setState(() => _errorText = "该名称已存在，请勿重复");
+      return;
+    }
+
+    widget.onSubmit(name, _selectedColor);
+    Navigator.pop(context);
   }
 
   @override
@@ -55,11 +77,16 @@ class _ProjectEntryDialogState extends State<ProjectEntryDialog> {
             TextField(
               controller: _nameController,
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '事件名称',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                errorText: _errorText, // 显示错误信息
               ),
+              onChanged: (v) {
+                // 输入时清除错误提示
+                if (_errorText != null) setState(() => _errorText = null);
+              },
             ),
             const SizedBox(height: 20),
             
@@ -97,7 +124,6 @@ class _ProjectEntryDialogState extends State<ProjectEntryDialog> {
                 runSpacing: 12,
                 children: [
                   ...kDefaultColorPalette.map((color) => _buildPresetColorCircle(color)),
-                  // 自定义入口
                   GestureDetector(
                     onTap: () => setState(() => _isCustomMode = true),
                     child: Container(
@@ -129,11 +155,7 @@ class _ProjectEntryDialogState extends State<ProjectEntryDialog> {
           child: const Text('取消'),
         ),
         ElevatedButton(
-          onPressed: () {
-            if (_nameController.text.trim().isEmpty) return;
-            widget.onSubmit(_nameController.text.trim(), _selectedColor);
-            Navigator.pop(context);
-          },
+          onPressed: _validateAndSubmit, // 点击时校验
           child: Text(widget.confirmText),
         ),
       ],

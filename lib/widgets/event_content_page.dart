@@ -139,9 +139,11 @@ class _EventContentPageState extends State<EventContentPage> {
     );
   }
 
+  // 【新增】包含查重逻辑的新增弹窗
   void _showAddTaskDialog(BuildContext context, List<Project> projects) {
     String name = "";
     Project? selectedProject = projects.isNotEmpty ? projects.first : null;
+    String? errorText; // 错误信息状态
 
     showDialog(
       context: context,
@@ -155,8 +157,16 @@ class _EventContentPageState extends State<EventContentPage> {
                 children: [
                   TextField(
                     autofocus: true,
-                    decoration: const InputDecoration(labelText: '内容名称', border: OutlineInputBorder()),
-                    onChanged: (v) => name = v,
+                    decoration: InputDecoration(
+                      labelText: '内容名称', 
+                      border: const OutlineInputBorder(),
+                      errorText: errorText, // 显示错误
+                    ),
+                    onChanged: (v) {
+                      name = v;
+                      // 输入时清除错误
+                      if (errorText != null) setState(() => errorText = null);
+                    },
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<Project>(
@@ -180,8 +190,21 @@ class _EventContentPageState extends State<EventContentPage> {
                 TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
                 ElevatedButton(
                   onPressed: () {
-                    if (name.isNotEmpty && selectedProject != null) {
-                      _dataManager.addTask(name, selectedProject!.id);
+                    final trimmedName = name.trim();
+                    
+                    if (trimmedName.isEmpty) {
+                      setState(() => errorText = "名称不能为空");
+                      return;
+                    }
+
+                    // 【查重逻辑】
+                    if (_dataManager.tasks.any((t) => t.name == trimmedName)) {
+                      setState(() => errorText = "该内容名称已存在");
+                      return;
+                    }
+
+                    if (selectedProject != null) {
+                      _dataManager.addTask(trimmedName, selectedProject!.id);
                       Navigator.pop(context);
                     }
                   },
@@ -195,12 +218,14 @@ class _EventContentPageState extends State<EventContentPage> {
     );
   }
 
+  // 【编辑】包含查重逻辑的编辑弹窗
   void _showEditTaskDialog(BuildContext context, Task task, List<Project> projects) {
     String name = task.name;
     Project? selectedProject = projects.firstWhere(
       (p) => p.id == task.projectId, 
       orElse: () => projects.isNotEmpty ? projects.first : projects[0]
     );
+    String? errorText;
 
     showDialog(
       context: context,
@@ -214,8 +239,15 @@ class _EventContentPageState extends State<EventContentPage> {
                 children: [
                   TextField(
                     controller: TextEditingController(text: name),
-                    decoration: const InputDecoration(labelText: '内容名称', border: OutlineInputBorder()),
-                    onChanged: (v) => name = v,
+                    decoration: InputDecoration(
+                      labelText: '内容名称', 
+                      border: const OutlineInputBorder(),
+                      errorText: errorText,
+                    ),
+                    onChanged: (v) {
+                      name = v;
+                      if (errorText != null) setState(() => errorText = null);
+                    },
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<Project>(
@@ -239,8 +271,21 @@ class _EventContentPageState extends State<EventContentPage> {
                 TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
                 ElevatedButton(
                   onPressed: () {
-                    if (name.isNotEmpty && selectedProject != null) {
-                      _dataManager.updateTask(task.id, name, selectedProject!.id);
+                    final trimmedName = name.trim();
+
+                    if (trimmedName.isEmpty) {
+                      setState(() => errorText = "名称不能为空");
+                      return;
+                    }
+
+                    // 【查重逻辑】排除自己
+                    if (_dataManager.tasks.any((t) => t.name == trimmedName && t.id != task.id)) {
+                      setState(() => errorText = "该内容名称已存在");
+                      return;
+                    }
+
+                    if (selectedProject != null) {
+                      _dataManager.updateTask(task.id, trimmedName, selectedProject!.id);
                       Navigator.pop(context);
                     }
                   },

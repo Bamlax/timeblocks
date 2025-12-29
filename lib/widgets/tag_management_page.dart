@@ -102,37 +102,64 @@ class TagManagementPage extends StatelessWidget {
   void _showTagDialog(BuildContext context, DataManager manager, {Tag? tag}) {
     final bool isEdit = tag != null;
     String name = tag?.name ?? "";
-    
+    String? errorText;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isEdit ? '编辑标签' : '新建标签'),
-        content: TextFormField(
-          initialValue: name,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: '标签名称', border: OutlineInputBorder()),
-          onChanged: (v) => name = v,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx), 
-            child: const Text('取消')
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (name.trim().isNotEmpty) {
-                if (isEdit) {
-                  manager.updateTag(tag.id, name.trim());
-                } else {
-                  manager.addTag(name.trim());
-                }
-                Navigator.pop(ctx);
-              }
-            },
-            child: Text(isEdit ? '保存' : '添加'),
-          ),
-        ],
-      ),
+      builder: (context) {
+        // 【关键】使用 StatefulBuilder 使得弹窗内部可以 setState 刷新错误信息
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(isEdit ? '编辑标签' : '新建标签'),
+              content: TextFormField(
+                initialValue: name,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: '标签名称', 
+                  border: const OutlineInputBorder(),
+                  errorText: errorText, // 绑定错误信息
+                ),
+                onChanged: (v) {
+                  name = v;
+                  if (errorText != null) setState(() => errorText = null);
+                },
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context), 
+                  child: const Text('取消')
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    final trimmedName = name.trim();
+                    
+                    if (trimmedName.isEmpty) {
+                      setState(() => errorText = "名称不能为空");
+                      return;
+                    }
+                    
+                    // 【查重逻辑】
+                    // 如果存在同名标签，且不是当前正在编辑的标签本身
+                    if (manager.tags.any((t) => t.name == trimmedName && t.id != tag?.id)) {
+                      setState(() => errorText = "该标签已存在");
+                      return;
+                    }
+
+                    if (isEdit) {
+                      manager.updateTag(tag!.id, trimmedName);
+                    } else {
+                      manager.addTag(trimmedName);
+                    }
+                    Navigator.pop(context);
+                  },
+                  child: Text(isEdit ? '保存' : '添加'),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
   }
 }

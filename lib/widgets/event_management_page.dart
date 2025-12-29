@@ -146,6 +146,12 @@ class _EventManagementPageState extends State<EventManagementPage> {
   }
 
   void _showEditDialog(BuildContext context, Project project) {
+    // 【修改点】获取其他项目的名称，用于查重
+    final otherNames = _dataManager.projects
+        .where((p) => p.id != project.id && p.id != 'clear')
+        .map((p) => p.name)
+        .toList();
+
     showDialog(
       context: context,
       builder: (context) => ProjectEntryDialog(
@@ -153,6 +159,7 @@ class _EventManagementPageState extends State<EventManagementPage> {
         confirmText: '保存',
         initialName: project.name,
         initialColor: project.color,
+        existingNames: otherNames, // 传入查重列表
         onSubmit: (newName, newColor) {
           _dataManager.updateProject(project.id, newName, newColor);
         },
