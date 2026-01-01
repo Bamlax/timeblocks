@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants.dart';
-import '../data_manager.dart';
+import '../data_manager.dart'; // 需要引入 DataManager 查找 Tag
 import '../models/project.dart';
 import '../models/time_entry.dart';
 
@@ -38,6 +38,7 @@ class HourRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // 左侧：时间标签 (宽度45)
           SizedBox(
             width: 45, 
             child: Center(
@@ -62,6 +63,7 @@ class HourRow extends StatelessWidget {
                     ),
             ),
           ),
+          // 右侧：展示网格
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -80,7 +82,7 @@ class HourRow extends StatelessWidget {
                         ),
                       )),
                     ),
-                    // 2. 颜色项目层
+                    // 2. 颜色项目层 (包含标签显示)
                     ..._buildMergedProjectBlocks(rowBaseMinute, blockWidth),
                     // 3. 选中状态层
                     Row(
@@ -93,28 +95,41 @@ class HourRow extends StatelessWidget {
                         );
                       }),
                     ),
-                    // 4. 当前时间小竖条
+                    // 4. 当前时间小竖条 (修复版)
                     if (isCurrentHourRow)
-                      Positioned(
-                        left: ((now.minute * 60 + now.second) / 3600.0) * totalWidth,
-                        top: 0,
-                        bottom: 0,
-                        child: IgnorePointer(
-                          child: Container(
-                            width: 3,
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(1.5),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.white.withOpacity(0.5),
-                                  blurRadius: 2,
-                                  spreadRadius: 1,
-                                )
-                              ],
+                      Builder(
+                        builder: (context) {
+                          // 定义竖条宽度
+                          const double barWidth = 3.0; 
+                          
+                          // 计算精确的时间比例 (秒级)
+                          final double ratio = (now.minute * 60 + now.second) / 3600.0;
+                          
+                          // 【核心修正】减去宽度的一半，实现中心对齐
+                          final double leftPos = (ratio * totalWidth) - (barWidth / 2);
+
+                          return Positioned(
+                            left: leftPos,
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Container(
+                                width: barWidth,
+                                decoration: BoxDecoration(
+                                  color: Colors.black, // 纯黑
+                                  borderRadius: BorderRadius.circular(1.0),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.white.withOpacity(0.8), // 白色光晕，增强对比
+                                      blurRadius: 3,
+                                      spreadRadius: 1,
+                                    )
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        }
                       ),
                   ],
                 );
@@ -129,25 +144,23 @@ class HourRow extends StatelessWidget {
   List<Widget> _buildMergedProjectBlocks(int rowBaseMinute, double blockWidth) {
     List<Widget> blocks = [];
     int i = 0;
-    final DataManager dm = DataManager();
+    final DataManager dm = DataManager(); // 用于查找 Tag
 
     while (i < 12) {
       final int currentMinute = rowBaseMinute + (i * 5);
       final TimeEntry? entry = timeData[currentMinute];
-      
       if (entry != null) {
         int j = i + 1;
         while (j < 12) {
           final int nextMinute = rowBaseMinute + (j * 5);
           final TimeEntry? nextEntry = timeData[nextMinute];
-          // 只要 uniqueId 不同 (包括标签不同)，就会停止合并
-          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) {
-            break; 
-          }
+          // 合并条件：uniqueId 必须一致 (包含 projectId, taskId, tagId)
+          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) break;
           j++;
         }
-        
         final int blockCount = j - i;
+        
+        // 查找标签对象
         final tag = dm.getTagById(entry.tagId);
 
         blocks.add(Positioned(
@@ -155,21 +168,21 @@ class HourRow extends StatelessWidget {
           top: 0, bottom: 0,
           width: blockCount * blockWidth,
           child: Container(
-            // 【核心修改】使用 BoxDecoration 添加背景色和白色右边框
+            // 使用 BoxDecoration 添加右侧白边分割线
             decoration: BoxDecoration(
               color: entry.project.color,
-              // 添加一条 1px 的白色右边框作为分割线
               border: const Border(
                 right: BorderSide(color: Colors.white, width: 1.0),
               ),
             ),
             alignment: Alignment.center,
+            // 使用 Column 显示 项目名 + 标签
             child: blockCount > 1
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        entry.displayName, 
+                        entry.displayName,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -179,6 +192,7 @@ class HourRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
+                      // 如果有标签，显示小字
                       if (tag != null)
                         Text(
                           "#${tag.name}",

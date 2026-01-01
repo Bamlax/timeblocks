@@ -19,6 +19,14 @@ class VersionRecord {
 
 const List<VersionRecord> appVersionHistory = [
     VersionRecord(
+    version: '0.3.2',
+    date: '2026-1-1',
+    updates: [
+      '修复时间小竖条错位的问题',
+    ],
+    isLatest: true,
+  ),
+    VersionRecord(
     version: '0.3.1',
     date: '2025-12-29',
     updates: [
