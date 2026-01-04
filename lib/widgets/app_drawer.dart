@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'event_content_page.dart';
 import 'event_management_page.dart';
-import 'tag_management_page.dart'; // 【新增】
+import 'tag_management_page.dart';
 import 'version_history_page.dart';
 import 'statistics_page.dart';
+import 'trends_page.dart';
 
 class AppDrawer extends StatefulWidget {
   const AppDrawer({super.key});
@@ -75,6 +76,20 @@ class _AppDrawerState extends State<AppDrawer> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (c) => const StatisticsPage()),
+                    );
+                  },
+                ),
+                
+                _buildMenuItem(
+                  context,
+                  icon: Icons.show_chart, // 折线图图标
+                  title: '趋势',
+                  subtitle: '查看时间变化曲线',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (c) => const TrendsPage()),
                     );
                   },
                 ),
