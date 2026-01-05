@@ -19,6 +19,18 @@ class VersionRecord {
 
 const List<VersionRecord> appVersionHistory = [
     VersionRecord(
+    version: '0.5.0',
+    date: '2026-1-5',
+    updates: [
+      '新增查看所有时间的趋势',
+      '优化统计图的绘制粗细',
+      '优化撤回的隐藏逻辑',
+      '优化撤回的隐藏逻辑',
+      '去除Timeblocks旁的符号',
+    ],
+    isLatest: true,
+  ),
+    VersionRecord(
     version: '0.4.0',
     date: '2026-1-4',
     updates: [

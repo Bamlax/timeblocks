@@ -55,16 +55,15 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final DataManager _dataManager = DataManager();
   
-  // 选中的分钟集合
-  final Set<int> _selectedMinutes = {};
+  // 用于手动控制 Scaffold (打开侧边栏)
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
-  // 拖拽起点
+  final Set<int> _selectedMinutes = {};
   int? _dragStartIndex;
   
-  // --- 撤销功能相关变量 ---
-  Map<int, TimeEntry?>? _undoSnapshot; // 记录修改前的数据
-  bool _showUndoButton = false;        // 是否显示撤销按钮
-  Timer? _undoHideTimer;               // 2秒倒计时器
+  // 撤销功能相关
+  Map<int, TimeEntry?>? _undoSnapshot; 
+  bool _showUndoButton = false;        
 
   late ScrollController _scrollController;
   Timer? _timer;
@@ -89,7 +88,6 @@ class _HomePageState extends State<HomePage> {
     _dataManager.removeListener(_onDataChanged);
     _scrollController.dispose();
     _timer?.cancel();
-    _undoHideTimer?.cancel();
     super.dispose();
   }
 
@@ -135,42 +133,32 @@ class _HomePageState extends State<HomePage> {
 
   // --- 撤销逻辑 ---
 
-  // 1. 记录当前选区的数据快照
   void _recordUndoSnapshot() {
     _undoSnapshot = {};
     for (var index in _selectedMinutes) {
-      _undoSnapshot![index] = _dataManager.timeData[index]; // 记录引用
+      _undoSnapshot![index] = _dataManager.timeData[index];
     }
   }
 
-  // 2. 显示撤销按钮，并启动定时器
   void _showUndo() {
     setState(() {
       _showUndoButton = true;
     });
-    
-    // 重置定时器
-    _undoHideTimer?.cancel();
-    _undoHideTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _showUndoButton = false;
-          _undoSnapshot = null; // 超时清除快照
-        });
-      }
-    });
   }
 
-  // 3. 执行撤销
-  void _performUndo() {
-    if (_undoSnapshot != null) {
-      // 恢复数据
-      _dataManager.batchUpdate(_undoSnapshot!);
-      
+  void _dismissUndo() {
+    if (_showUndoButton) {
       setState(() {
         _showUndoButton = false;
         _undoSnapshot = null;
       });
+    }
+  }
+
+  void _performUndo() {
+    if (_undoSnapshot != null) {
+      _dataManager.batchUpdate(_undoSnapshot!);
+      _dismissUndo();
       
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -185,11 +173,14 @@ class _HomePageState extends State<HomePage> {
   // --- 手势与应用逻辑 ---
 
   void _handleTap(Offset localPosition) {
+    _dismissUndo(); 
+
     final int? minute = _calculateMinuteFromOffset(localPosition);
     if (minute == null) {
       _clearSelection();
       return;
     }
+
     setState(() {
       if (_selectedMinutes.contains(minute)) {
         _selectedMinutes.remove(minute);
@@ -199,7 +190,11 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _handleDrag(Offset localPosition, {bool isStart = false}) {
+  void _handleGlobalGesture(Offset localPosition, {bool isStart = false}) {
+    if (isStart) {
+      _dismissUndo(); 
+    }
+
     final int? currentMinute = _calculateMinuteFromOffset(localPosition);
     if (currentMinute == null) return;
 
@@ -210,7 +205,9 @@ class _HomePageState extends State<HomePage> {
         _selectedMinutes.add(currentMinute);
       } else {
         if (_dragStartIndex == null) return;
+        
         _selectedMinutes.clear(); 
+        
         int start = _dragStartIndex!;
         int end = currentMinute;
         if (start > end) {
@@ -224,6 +221,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _clearSelection() {
+    _dismissUndo(); 
+
     if (_selectedMinutes.isNotEmpty) {
       setState(() {
         _selectedMinutes.clear();
@@ -232,14 +231,11 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 应用项目/任务
   void _applyEntry(Project? project, [Task? task]) {
     if (_selectedMinutes.isEmpty) return;
     
-    // 1. 记录快照
     _recordUndoSnapshot();
 
-    // 2. 执行更新
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       if (project == null) {
@@ -248,24 +244,22 @@ class _HomePageState extends State<HomePage> {
         updates[index] = TimeEntry(project: project, task: task);
       }
     }
+    
     _dataManager.batchUpdate(updates);
     
-    // 3. 清除选区并显示撤回
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    
     _showUndo();
   }
 
-  // 应用标签
   void _applyTag(String? tagId) {
     if (_selectedMinutes.isEmpty) return;
 
-    // 1. 记录快照
     _recordUndoSnapshot();
 
-    // 2. 执行更新
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       final existingEntry = _dataManager.timeData[index];
@@ -278,11 +272,11 @@ class _HomePageState extends State<HomePage> {
       _dataManager.batchUpdate(updates);
     }
     
-    // 3. 清除选区并显示撤回
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    
     _showUndo();
   }
 
@@ -291,6 +285,7 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先在侧边栏创建标签")));
       return;
     }
+
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -337,20 +332,36 @@ class _HomePageState extends State<HomePage> {
     final bool hasSelection = _selectedMinutes.isNotEmpty;
 
     return Scaffold(
+      key: _scaffoldKey,
       drawer: const AppDrawer(),
       appBar: AppBar(
+        // 1. 左侧菜单
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          tooltip: "导航栏",
+          onPressed: () {
+            _dismissUndo();
+            _scaffoldKey.currentState?.openDrawer();
+          },
+        ),
+        // 2. 标题 (点击文字回到今天)
         title: GestureDetector(
-          onTap: _scrollToToday,
-          child: const Row(
-            mainAxisSize: MainAxisSize.min, 
-            children: [
-              Text('Timeblocks'),
-              SizedBox(width: 4),
-              Icon(Icons.keyboard_arrow_up, size: 16, color: Colors.grey),
-            ],
-          ),
+          onTap: () {
+            _dismissUndo();
+            _scrollToToday();
+          },
+          // 【修改点】去掉了 Row 和 Icon，只保留文字
+          child: const Text('Timeblocks'),
         ),
         centerTitle: true,
+        // 3. 背景点击 (点击空白处回到今天)
+        flexibleSpace: GestureDetector(
+          onTap: () {
+            _dismissUndo();
+            _scrollToToday();
+          },
+          behavior: HitTestBehavior.translucent,
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(color: Colors.grey.shade200, height: 1),
@@ -358,7 +369,7 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Stack(
         children: [
-          // 1. 主体内容 (网格 + 列表)
+          // 主体内容
           GestureDetector(
             onTap: _clearSelection, 
             behavior: HitTestBehavior.translucent,
@@ -369,8 +380,8 @@ class _HomePageState extends State<HomePage> {
                   flex: 70,
                   child: GestureDetector(
                     onTapUp: (details) => _handleTap(details.localPosition),
-                    onLongPressStart: (details) => _handleDrag(details.localPosition, isStart: true),
-                    onLongPressMoveUpdate: (details) => _handleDrag(details.localPosition, isStart: false),
+                    onLongPressStart: (details) => _handleGlobalGesture(details.localPosition, isStart: true),
+                    onLongPressMoveUpdate: (details) => _handleGlobalGesture(details.localPosition, isStart: false),
                     
                     child: ScrollConfiguration(
                       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
@@ -461,7 +472,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // 2. 底部弹出：选择操作栏
+          // 底部弹出操作栏
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
@@ -484,18 +495,13 @@ class _HomePageState extends State<HomePage> {
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   const SizedBox(width: 16),
-                  
-                  // 标签按钮
                   TextButton.icon(
                     onPressed: _showTagSelector,
                     icon: const Icon(Icons.label_outline, size: 20),
                     label: const Text("标签"),
                     style: TextButton.styleFrom(foregroundColor: Colors.blue[700]),
                   ),
-
                   const Spacer(),
-                  
-                  // 清除按钮
                   ElevatedButton.icon(
                     onPressed: () => _applyEntry(null),
                     icon: const Icon(Icons.cleaning_services, size: 16),
@@ -512,13 +518,11 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // 3. 底部弹出：撤销按钮 (右下角)
-          // 只有当没有选区，且 _showUndoButton 为 true 时显示
+          // 底部弹出：撤销按钮
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             curve: Curves.elasticOut,
             right: 20,
-            // 如果有选区操作栏，撤销按钮藏起来，否则显示
             bottom: (!hasSelection && _showUndoButton) ? 30 : -80, 
             child: FloatingActionButton.extended(
               onPressed: _performUndo,
@@ -534,30 +538,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-    Widget _buildSimpleAddButton() {
+  Widget _buildSimpleAddButton() {
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
-        onTap: () {
-          // 【修改点】获取所有现有项目名称
-          final existingNames = _dataManager.projects
-              .where((p) => p.id != 'clear')
-              .map((p) => p.name)
-              .toList();
-
-          showDialog(
-            context: context,
-            builder: (c) => ProjectEntryDialog(
-              title: '新增事件',
-              confirmText: '添加',
-              existingNames: existingNames, // 传入查重列表
-              onSubmit: (name, color) {
-                _dataManager.addProject(name, color);
-              },
-            ),
-          );
-        },
+        onTap: () => showDialog(
+          context: context,
+          builder: (c) => ProjectEntryDialog(
+            title: '新增事件',
+            confirmText: '添加',
+            onSubmit: (name, color) {
+              _dataManager.addProject(name, color);
+            },
+          ),
+        ),
         borderRadius: BorderRadius.circular(6),
         child: Container(
           width: double.infinity,

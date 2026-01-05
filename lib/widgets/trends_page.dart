@@ -8,7 +8,8 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../models/tag.dart';
 
-enum TrendPeriod { week, month, year }
+// 【修改点】新增 all
+enum TrendPeriod { week, month, year, all }
 
 enum TargetType { project, task, tag }
 
@@ -52,8 +53,6 @@ class _TrendsPageState extends State<TrendsPage> {
   @override
   void initState() {
     super.initState();
-    // 【修改点】这里删除了自动添加第一个项目的逻辑
-    // 现在默认进来是空的
   }
 
   // --- 时间导航 ---
@@ -64,9 +63,10 @@ class _TrendsPageState extends State<TrendsPage> {
         _anchorDate = _anchorDate.add(Duration(days: 7 * offset));
       } else if (_selectedPeriod == TrendPeriod.month) {
         _anchorDate = DateTime(_anchorDate.year, _anchorDate.month + offset, _anchorDate.day);
-      } else {
+      } else if (_selectedPeriod == TrendPeriod.year) {
         _anchorDate = DateTime(_anchorDate.year + offset, _anchorDate.month, _anchorDate.day);
       }
+      // "all" 模式不需要移动
     });
   }
 
@@ -79,8 +79,10 @@ class _TrendsPageState extends State<TrendsPage> {
       return "${formatter.format(start)} - ${formatter.format(end)}";
     } else if (_selectedPeriod == TrendPeriod.month) {
       return "${_anchorDate.year}年${_anchorDate.month}月";
-    } else {
+    } else if (_selectedPeriod == TrendPeriod.year) {
       return "${_anchorDate.year}年";
+    } else {
+      return "有史以来";
     }
   }
 
@@ -222,11 +224,14 @@ class _TrendsPageState extends State<TrendsPage> {
       color: Colors.grey.shade50,
       child: Column(
         children: [
+          // 周期切换
           SegmentedButton<TrendPeriod>(
             segments: const [
               ButtonSegment(value: TrendPeriod.week, label: Text("周")),
               ButtonSegment(value: TrendPeriod.month, label: Text("月")),
               ButtonSegment(value: TrendPeriod.year, label: Text("年")),
+              // 【修改点】新增“全部”
+              ButtonSegment(value: TrendPeriod.all, label: Text("全部")),
             ],
             selected: {_selectedPeriod},
             onSelectionChanged: (newSelection) {
@@ -238,13 +243,16 @@ class _TrendsPageState extends State<TrendsPage> {
             ),
           ),
           const SizedBox(height: 12),
+          
+          // 日期导航 (选中“全部”时隐藏)
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                onPressed: () => _moveDate(-1),
-              ),
+              if (_selectedPeriod != TrendPeriod.all)
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () => _moveDate(-1),
+                ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
@@ -260,10 +268,11 @@ class _TrendsPageState extends State<TrendsPage> {
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                onPressed: () => _moveDate(1),
-              ),
+              if (_selectedPeriod != TrendPeriod.all)
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: () => _moveDate(1),
+                ),
             ],
           ),
         ],
@@ -307,6 +316,14 @@ class _TrendsPageState extends State<TrendsPage> {
     DateTime startRange;
     DateTime endRange;
     int maxX; 
+    
+    // 【修改点】处理 "all" 模式
+    // 需要找到数据的最早时间点作为起点
+    DateTime? firstRecordDate;
+    if (_selectedPeriod == TrendPeriod.all && dm.timeData.isNotEmpty) {
+      final int firstMin = dm.timeData.keys.reduce(math.min);
+      firstRecordDate = kAnchorDate.add(Duration(minutes: firstMin));
+    }
 
     if (_selectedPeriod == TrendPeriod.week) {
       startRange = DateTime(_anchorDate.year, _anchorDate.month, _anchorDate.day).subtract(Duration(days: _anchorDate.weekday - 1));
@@ -316,10 +333,26 @@ class _TrendsPageState extends State<TrendsPage> {
       startRange = DateTime(_anchorDate.year, _anchorDate.month, 1);
       endRange = DateTime(_anchorDate.year, _anchorDate.month + 1, 1);
       maxX = DateUtils.getDaysInMonth(_anchorDate.year, _anchorDate.month);
-    } else {
+    } else if (_selectedPeriod == TrendPeriod.year) {
       startRange = DateTime(_anchorDate.year, 1, 1);
       endRange = DateTime(_anchorDate.year + 1, 1, 1);
       maxX = 12;
+    } else {
+      // All
+      if (firstRecordDate == null) {
+        // 无数据时
+        startRange = DateTime.now(); 
+        endRange = DateTime.now();
+        maxX = 1;
+      } else {
+        // 从第一条记录的当月1号开始，到下个月1号结束
+        startRange = DateTime(firstRecordDate.year, firstRecordDate.month, 1);
+        final now = DateTime.now();
+        endRange = DateTime(now.year, now.month + 1, 1); // 包含本月
+        // 计算月数差作为 X 轴长度
+        maxX = (endRange.year - startRange.year) * 12 + (endRange.month - startRange.month);
+        if (maxX <= 0) maxX = 1;
+      }
     }
 
     final int startMin = startRange.difference(kAnchorDate).inMinutes;
@@ -341,37 +374,35 @@ class _TrendsPageState extends State<TrendsPage> {
           if (isMatch) {
             final DateTime blockTime = kAnchorDate.add(Duration(minutes: minuteIndex));
             int xKey;
+            
             if (_selectedPeriod == TrendPeriod.week) {
               xKey = blockTime.weekday - 1; 
             } else if (_selectedPeriod == TrendPeriod.month) {
               xKey = blockTime.day; 
-            } else {
+            } else if (_selectedPeriod == TrendPeriod.year) {
               xKey = blockTime.month; 
+            } else {
+              // All: 按月聚合，Key 为距离 startRange 的月数
+              xKey = (blockTime.year - startRange.year) * 12 + (blockTime.month - startRange.month);
             }
+            
             spotsMap[xKey] = (spotsMap[xKey] ?? 0) + 5;
           }
         }
       });
 
       List<FlSpot> spots = [];
-      if (_selectedPeriod == TrendPeriod.week) {
-        for (int i = 0; i <= 6; i++) {
-          double hours = (spotsMap[i] ?? 0) / 60.0;
-          spots.add(FlSpot(i.toDouble(), hours));
-          if (hours > maxY) maxY = hours;
-        }
-      } else if (_selectedPeriod == TrendPeriod.month) {
-        for (int i = 1; i <= maxX; i++) {
-          double hours = (spotsMap[i] ?? 0) / 60.0;
-          spots.add(FlSpot(i.toDouble(), hours));
-          if (hours > maxY) maxY = hours;
-        }
-      } else { 
-        for (int i = 1; i <= 12; i++) {
-          double hours = (spotsMap[i] ?? 0) / 60.0;
-          spots.add(FlSpot(i.toDouble(), hours));
-          if (hours > maxY) maxY = hours;
-        }
+      
+      // 生成点
+      int loopMax = (_selectedPeriod == TrendPeriod.week) ? 6 : maxX;
+      int loopStart = (_selectedPeriod == TrendPeriod.month || _selectedPeriod == TrendPeriod.year) ? 1 : 0;
+      // "all" 模式从 0 开始
+      if (_selectedPeriod == TrendPeriod.all) loopStart = 0;
+
+      for (int i = loopStart; i <= loopMax; i++) {
+        double hours = (spotsMap[i] ?? 0) / 60.0;
+        spots.add(FlSpot(i.toDouble(), hours));
+        if (hours > maxY) maxY = hours;
       }
 
       lineBarsData.add(LineChartBarData(
@@ -379,7 +410,8 @@ class _TrendsPageState extends State<TrendsPage> {
         isCurved: true,
         preventCurveOverShooting: true, 
         color: target.color,
-        barWidth: 3,
+        // 【修改点】线变细 (3 -> 1)
+        barWidth: 2.0, 
         isStrokeCapRound: true,
         dotData: FlDotData(show: false),
         belowBarData: BarAreaData(show: false), 
@@ -419,8 +451,9 @@ class _TrendsPageState extends State<TrendsPage> {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 30,
-              interval: _selectedPeriod == TrendPeriod.month ? 5 : 1,
-              getTitlesWidget: (value, meta) => _bottomTitleWidgets(value, meta),
+              // 根据数据量动态调整间隔
+              interval: _calculateXInterval(maxX), 
+              getTitlesWidget: (value, meta) => _bottomTitleWidgets(value, meta, startRange),
             ),
           ),
           leftTitles: AxisTitles(
@@ -436,7 +469,7 @@ class _TrendsPageState extends State<TrendsPage> {
           ),
         ),
         borderData: FlBorderData(show: false),
-        minX: _selectedPeriod == TrendPeriod.week ? 0 : 1,
+        minX: (_selectedPeriod == TrendPeriod.month || _selectedPeriod == TrendPeriod.year) ? 1 : 0,
         maxX: maxX.toDouble(),
         minY: 0,
         maxY: maxY * 1.1,
@@ -445,20 +478,28 @@ class _TrendsPageState extends State<TrendsPage> {
     );
   }
 
-  Widget _bottomTitleWidgets(double value, TitleMeta meta) {
+  Widget _bottomTitleWidgets(double value, TitleMeta meta, DateTime startRange) {
     const style = TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 10);
     String text = '';
+    int index = value.toInt();
 
     if (_selectedPeriod == TrendPeriod.week) {
       const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
-      int index = value.toInt();
       if (index >= 0 && index < 7) text = weekdays[index];
     } else if (_selectedPeriod == TrendPeriod.month) {
-      int day = value.toInt();
-      if (day == 1 || day % 5 == 0) text = '$day日';
-    } else { 
-      int month = value.toInt();
-      text = '$month月';
+      if (index == 1 || index % 5 == 0) text = '$index日';
+    } else if (_selectedPeriod == TrendPeriod.year) {
+      text = '$index月';
+    } else {
+      // All: 显示 Year-Month
+      // 计算当前 index 对应的月份
+      final currentMonthDate = DateTime(startRange.year, startRange.month + index);
+      // 如果跨年了显示年份，否则只显示月份
+      if (index == 0 || currentMonthDate.month == 1) {
+        text = DateFormat('yy/MM').format(currentMonthDate);
+      } else {
+        text = DateFormat('MM').format(currentMonthDate);
+      }
     }
 
     return SideTitleWidget(
@@ -472,5 +513,17 @@ class _TrendsPageState extends State<TrendsPage> {
     if (maxY <= 5) return 1;
     if (maxY <= 10) return 2;
     return 5;
+  }
+
+  // 动态计算X轴标签间隔，防止 "All" 模式下文字重叠
+  double _calculateXInterval(int maxX) {
+    if (_selectedPeriod == TrendPeriod.month) return 5;
+    if (_selectedPeriod == TrendPeriod.all) {
+      // 如果月份很多，每隔几个月显示一次
+      if (maxX > 24) return 6; // 半年
+      if (maxX > 12) return 3; // 季度
+      return 1;
+    }
+    return 1;
   }
 }
