@@ -36,7 +36,7 @@ const List<VersionRecord> appVersionHistory = [
     updates: [
       '新增趋势功能',
     ],
-    isLatest: true,
+    isLatest: false,
   ),
     VersionRecord(
     version: '0.3.2',
