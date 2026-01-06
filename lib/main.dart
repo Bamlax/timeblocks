@@ -6,18 +6,14 @@ import 'models/time_entry.dart';
 import 'models/project.dart';
 import 'models/task.dart';
 import 'widgets/hour_row.dart';
-import 'widgets/project_entry_dialog.dart'; // 用于新增
-import 'widgets/project_edit_dialog.dart';  // 【新增】用于长按编辑
+import 'widgets/project_entry_dialog.dart'; 
+import 'widgets/project_edit_dialog.dart'; 
 import 'widgets/project_button.dart';
 import 'widgets/app_drawer.dart';
 
 void main() async {
-  // 1. 确保 Flutter 绑定初始化
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 2. 启动前先加载本地保存的数据
   await DataManager().init();
-
   runApp(const TimeBlockApp());
 }
 
@@ -59,22 +55,21 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final DataManager _dataManager = DataManager();
-  
-  // 用于手动控制 Scaffold (打开侧边栏)
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
   final Set<int> _selectedMinutes = {};
-  
-  // 记录拖拽开始时的分钟索引 (用于范围选择)
   int? _dragStartIndex;
-  
-  // 撤销功能相关
   Map<int, TimeEntry?>? _undoSnapshot; 
   bool _showUndoButton = false;        
+  TimeEntry? _activeTrackingEntry;
 
   late ScrollController _scrollController;
   Timer? _timer;
   final GlobalKey _listViewKey = GlobalKey();
+
+  // 【恢复】缩放相关变量
+  final List<int> _zoomLevels = [1, 2, 5, 10];
+  int _baseDuration = 5;
 
   @override
   void initState() {
@@ -82,8 +77,23 @@ class _HomePageState extends State<HomePage> {
     _dataManager.addListener(_onDataChanged);
     _scrollController = ScrollController(initialScrollOffset: _calculateInitialOffset());
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {}); 
+        _checkAndFillCurrentMinute();
+      }
     });
+  }
+
+  void _checkAndFillCurrentMinute() {
+    if (_activeTrackingEntry == null) return;
+    final now = DateTime.now();
+    final int currentMinuteIndex = now.difference(kAnchorDate).inMinutes;
+    final TimeEntry? existing = _dataManager.timeData[currentMinuteIndex];
+    if (existing?.uniqueId != _activeTrackingEntry!.uniqueId) {
+      _dataManager.batchUpdate({
+        currentMinuteIndex: _activeTrackingEntry
+      });
+    }
   }
 
   void _onDataChanged() {
@@ -102,7 +112,6 @@ class _HomePageState extends State<HomePage> {
     final now = DateTime.now();
     final int hoursDiff = now.difference(kAnchorDate).inHours;
     double offset = hoursDiff * kHourHeight;
-    // 视觉修正：让当前时间位于屏幕上方约 300 像素处
     offset -= 300; 
     return offset < 0 ? 0 : offset;
   }
@@ -116,49 +125,61 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- 手势计算逻辑 ---
   int? _calculateMinuteFromOffset(Offset localPosition) {
     final RenderBox? renderBox = _listViewKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return null;
-    
-    // 必须与 HourRow 中的设置保持一致 (当前是 45.0)
     const double timeLabelWidth = 45.0; 
     if (localPosition.dx <= timeLabelWidth) return null;
-
     final double gridX = localPosition.dx - timeLabelWidth;
     final double gridY = localPosition.dy + _scrollController.offset;
-
     final int hourIndex = (gridY / kHourHeight).floor();
     if (hourIndex < 0) return null;
-
     final double totalGridWidth = renderBox.size.width - timeLabelWidth;
-    
-    // 动态计算列数
     final int duration = _dataManager.timeBlockDuration;
     final int blocksPerHour = 60 ~/ duration;
     final double blockWidth = totalGridWidth / blocksPerHour;
-    
     int blockIndex = (gridX / blockWidth).floor();
     if (blockIndex < 0) blockIndex = 0;
     if (blockIndex >= blocksPerHour) blockIndex = blocksPerHour - 1;
-
     return hourIndex * 60 + blockIndex * duration;
   }
 
-  // --- 撤销逻辑 ---
+  // --- 【恢复】手势缩放逻辑 ---
+  void _onScaleStart(ScaleStartDetails details) {
+    _baseDuration = _dataManager.timeBlockDuration;
+  }
 
-  void _recordUndoSnapshot() {
-    _undoSnapshot = {};
-    for (var index in _selectedMinutes) {
-      _undoSnapshot![index] = _dataManager.timeData[index];
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    int currentIndex = _zoomLevels.indexOf(_baseDuration);
+    if (currentIndex == -1) currentIndex = 2; 
+
+    int targetIndex = currentIndex;
+    // 调整灵敏度
+    if (details.scale > 1.3) {
+      targetIndex = (currentIndex - 1).clamp(0, _zoomLevels.length - 1);
+    } else if (details.scale < 0.7) {
+      targetIndex = (currentIndex + 1).clamp(0, _zoomLevels.length - 1);
+    }
+    final int newDuration = _zoomLevels[targetIndex];
+    if (newDuration != _dataManager.timeBlockDuration) {
+      _dataManager.updateTimeBlockDuration(newDuration);
+      _clearSelection();
     }
   }
 
-  void _showUndo() {
-    setState(() {
-      _showUndoButton = true;
-    });
+  // --- 撤销逻辑 ---
+  void _recordUndoSnapshot() {
+    _undoSnapshot = {};
+    final int duration = _dataManager.timeBlockDuration;
+    for (var startIndex in _selectedMinutes) {
+      for (int i = 0; i < duration; i++) {
+        final int exactMinute = startIndex + i;
+        _undoSnapshot![exactMinute] = _dataManager.timeData[exactMinute];
+      }
+    }
   }
+
+  void _showUndo() => setState(() => _showUndoButton = true);
 
   void _dismissUndo() {
     if (_showUndoButton) {
@@ -173,28 +194,20 @@ class _HomePageState extends State<HomePage> {
     if (_undoSnapshot != null) {
       _dataManager.batchUpdate(_undoSnapshot!);
       _dismissUndo();
-      
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("已撤销更改"), 
-          duration: Duration(milliseconds: 600),
-          behavior: SnackBarBehavior.floating,
-        )
+        const SnackBar(content: Text("已撤销更改"), duration: Duration(milliseconds: 600), behavior: SnackBarBehavior.floating)
       );
     }
   }
 
   // --- 手势与应用逻辑 ---
-
   void _handleTap(Offset localPosition) {
     _dismissUndo(); 
-
     final int? minute = _calculateMinuteFromOffset(localPosition);
     if (minute == null) {
       _clearSelection();
       return;
     }
-
     setState(() {
       if (_selectedMinutes.contains(minute)) {
         _selectedMinutes.remove(minute);
@@ -205,16 +218,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleGlobalGesture(Offset localPosition, {bool isStart = false}) {
-    if (isStart) {
-      _dismissUndo(); 
-    }
-
+    if (isStart) _dismissUndo(); 
     final int? currentMinute = _calculateMinuteFromOffset(localPosition);
     if (currentMinute == null) return;
-
-    // 获取当前间隔步长
     final int step = _dataManager.timeBlockDuration;
-
     setState(() {
       if (isStart) {
         _selectedMinutes.clear(); 
@@ -222,9 +229,7 @@ class _HomePageState extends State<HomePage> {
         _selectedMinutes.add(currentMinute);
       } else {
         if (_dragStartIndex == null) return;
-        
         _selectedMinutes.clear(); 
-        
         int start = _dragStartIndex!;
         int end = currentMinute;
         if (start > end) {
@@ -239,7 +244,6 @@ class _HomePageState extends State<HomePage> {
 
   void _clearSelection() {
     _dismissUndo(); 
-
     if (_selectedMinutes.isNotEmpty) {
       setState(() {
         _selectedMinutes.clear();
@@ -249,51 +253,69 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _applyEntry(Project? project, [Task? task]) {
-    if (_selectedMinutes.isEmpty) return;
-    
-    _recordUndoSnapshot();
-
-    Map<int, TimeEntry?> updates = {};
-    for (var index in _selectedMinutes) {
-      if (project == null) {
-        updates[index] = null;
-      } else {
-        updates[index] = TimeEntry(project: project, task: task);
+    if (_selectedMinutes.isNotEmpty) {
+      _recordUndoSnapshot();
+      final int duration = _dataManager.timeBlockDuration;
+      Map<int, TimeEntry?> updates = {};
+      for (var startIndex in _selectedMinutes) {
+        for (int i = 0; i < duration; i++) {
+          final int exactMinute = startIndex + i;
+          if (project == null) {
+            updates[exactMinute] = null;
+          } else {
+            updates[exactMinute] = TimeEntry(project: project, task: task);
+          }
+        }
       }
+      _dataManager.batchUpdate(updates);
+      setState(() {
+        _selectedMinutes.clear();
+        _dragStartIndex = null;
+      });
+      _showUndo();
+      return;
     }
-    
-    _dataManager.batchUpdate(updates);
-    
-    setState(() {
-      _selectedMinutes.clear();
-      _dragStartIndex = null;
-    });
-    
-    _showUndo();
+
+    if (project != null) {
+      final newEntry = TimeEntry(project: project, task: task);
+      setState(() {
+        if (_activeTrackingEntry?.uniqueId == newEntry.uniqueId) {
+          _activeTrackingEntry = null;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已停止自动填充"), duration: Duration(seconds: 1)));
+        } else {
+          _activeTrackingEntry = newEntry;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("开始自动填充: ${newEntry.displayName}"), 
+              duration: const Duration(seconds: 1),
+              backgroundColor: project.color,
+            )
+          );
+          _checkAndFillCurrentMinute();
+        }
+      });
+    }
   }
 
   void _applyTag(String? tagId) {
     if (_selectedMinutes.isEmpty) return;
-
     _recordUndoSnapshot();
-
+    final int duration = _dataManager.timeBlockDuration;
     Map<int, TimeEntry?> updates = {};
-    for (var index in _selectedMinutes) {
-      final existingEntry = _dataManager.timeData[index];
-      if (existingEntry != null) {
-        updates[index] = existingEntry.copyWith(tagId: tagId, clearTag: tagId == null);
+    for (var startIndex in _selectedMinutes) {
+      for (int i = 0; i < duration; i++) {
+        final int exactMinute = startIndex + i;
+        final existingEntry = _dataManager.timeData[exactMinute];
+        if (existingEntry != null) {
+          updates[exactMinute] = existingEntry.copyWith(tagId: tagId, clearTag: tagId == null);
+        }
       }
     }
-    
-    if (updates.isNotEmpty) {
-      _dataManager.batchUpdate(updates);
-    }
-    
+    if (updates.isNotEmpty) _dataManager.batchUpdate(updates);
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
-    
     _showUndo();
   }
 
@@ -302,7 +324,6 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先在侧边栏创建标签")));
       return;
     }
-
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -343,28 +364,52 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _showBlockSizeDialog() {
+  void _showTrackingTagSelector() {
+    if (_activeTrackingEntry == null) return;
+    if (_dataManager.tags.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先在侧边栏创建标签")));
+      return;
+    }
     showModalBottomSheet(
       context: context,
-      builder: (ctx) {
+      builder: (context) {
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("调整时间块大小", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 8),
-              ...[1, 2, 5, 10, 20, 30].map((minutes) => ListTile(
-                title: Text("$minutes 分钟"),
-                trailing: _dataManager.timeBlockDuration == minutes 
-                    ? const Icon(Icons.check, color: Colors.blue) 
-                    : null,
-                onTap: () {
-                  _dataManager.updateTimeBlockDuration(minutes);
-                  _clearSelection();
-                  Navigator.pop(ctx);
-                },
-              )),
+              const Text("为当前专注添加标签", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Divider(),
+              Expanded(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    ..._dataManager.tags.map((tag) => ListTile(
+                      leading: const Icon(Icons.label, size: 18),
+                      title: Text(tag.name),
+                      trailing: _activeTrackingEntry!.tagId == tag.id ? const Icon(Icons.check, color: Colors.blue) : null,
+                      onTap: () {
+                        setState(() {
+                          _activeTrackingEntry = _activeTrackingEntry!.copyWith(tagId: tag.id);
+                        });
+                        _checkAndFillCurrentMinute();
+                        Navigator.pop(context);
+                      },
+                    )),
+                    ListTile(
+                      leading: const Icon(Icons.label_off, size: 18, color: Colors.red),
+                      title: const Text("移除标签", style: TextStyle(color: Colors.red)),
+                      onTap: () {
+                        setState(() {
+                          _activeTrackingEntry = _activeTrackingEntry!.copyWith(clearTag: true);
+                        });
+                        _checkAndFillCurrentMinute();
+                        Navigator.pop(context);
+                      },
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         );
@@ -398,28 +443,15 @@ class _HomePageState extends State<HomePage> {
         ),
         centerTitle: true,
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              _dismissUndo();
-              if (value == 'block_size') {
-                _showBlockSizeDialog();
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'block_size',
-                child: Row(
-                  children: [
-                    Icon(Icons.grid_view, size: 20, color: Colors.grey),
-                    SizedBox(width: 8),
-                    Text('调整块大小'),
-                  ],
-                ),
+          if (_activeTrackingEntry != null)
+            IconButton(
+              tooltip: "为当前专注添加标签",
+              icon: Icon(
+                _activeTrackingEntry!.tagId != null ? Icons.label : Icons.label_outline,
+                color: _activeTrackingEntry!.tagId != null ? Colors.blue : Colors.grey,
               ),
-            ],
-          ),
-          const SizedBox(width: 8),
+              onPressed: _showTrackingTagSelector,
+            ),
         ],
         flexibleSpace: GestureDetector(
           onTap: () {
@@ -435,54 +467,54 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Stack(
         children: [
-          // 1. 主体内容
           GestureDetector(
             onTap: _clearSelection, 
             behavior: HitTestBehavior.translucent,
             child: Row(
               children: [
-                // 左侧：时间网格
                 Expanded(
                   flex: 70,
+                  // 【核心修改】恢复了双指缩放功能 (GestureDetector)
                   child: GestureDetector(
-                    onTapUp: (details) => _handleTap(details.localPosition),
-                    onLongPressStart: (details) => _handleGlobalGesture(details.localPosition, isStart: true),
-                    onLongPressMoveUpdate: (details) => _handleGlobalGesture(details.localPosition, isStart: false),
-                    
-                    child: ScrollConfiguration(
-                      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                      child: ListenableBuilder(
-                        listenable: _dataManager,
-                        builder: (context, _) {
-                          return ListView.builder(
-                            key: _listViewKey,
-                            controller: _scrollController,
-                            itemCount: 200000 * 24,
-                            itemExtent: kHourHeight,
-                            itemBuilder: (context, index) {
-                              final DateTime currentRowTime = kAnchorDate.add(Duration(hours: index));
-                              final bool isCurrentHourRow = currentRowTime.year == now.year &&
-                                  currentRowTime.month == now.month &&
-                                  currentRowTime.day == now.day &&
-                                  currentRowTime.hour == now.hour;
-                    
-                              return HourRow(
-                                hourIndex: index,
-                                timeData: _dataManager.timeData,
-                                selectedMinutes: _selectedMinutes,
-                                isCurrentHourRow: isCurrentHourRow,
-                                now: now,
-                                timeBlockDuration: _dataManager.timeBlockDuration,
-                              );
-                            },
-                          );
-                        },
+                    onScaleStart: _onScaleStart,
+                    onScaleUpdate: _onScaleUpdate,
+                    child: GestureDetector(
+                      onTapUp: (details) => _handleTap(details.localPosition),
+                      onLongPressStart: (details) => _handleGlobalGesture(details.localPosition, isStart: true),
+                      onLongPressMoveUpdate: (details) => _handleGlobalGesture(details.localPosition, isStart: false),
+                      child: ScrollConfiguration(
+                        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                        child: ListenableBuilder(
+                          listenable: _dataManager,
+                          builder: (context, _) {
+                            return ListView.builder(
+                              key: _listViewKey,
+                              controller: _scrollController,
+                              itemCount: 200000 * 24,
+                              itemExtent: kHourHeight,
+                              itemBuilder: (context, index) {
+                                final DateTime currentRowTime = kAnchorDate.add(Duration(hours: index));
+                                final bool isCurrentHourRow = currentRowTime.year == now.year &&
+                                    currentRowTime.month == now.month &&
+                                    currentRowTime.day == now.day &&
+                                    currentRowTime.hour == now.hour;
+                      
+                                return HourRow(
+                                  hourIndex: index,
+                                  timeData: _dataManager.timeData,
+                                  selectedMinutes: _selectedMinutes,
+                                  isCurrentHourRow: isCurrentHourRow,
+                                  now: now,
+                                  timeBlockDuration: _dataManager.timeBlockDuration,
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
                 ),
-                
-                // 右侧：项目列表
                 Expanded(
                   flex: 30,
                   child: Container(
@@ -495,25 +527,25 @@ class _HomePageState extends State<HomePage> {
                       itemCount: _dataManager.projects.length + 1,
                       separatorBuilder: (c, i) => const SizedBox(height: 6),
                       itemBuilder: (context, index) {
-                        // 底部新增按钮
                         if (index == _dataManager.projects.length) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: _buildSimpleAddButton(),
                           );
                         }
-
                         final project = _dataManager.projects[index];
                         final subTasks = _dataManager.getTasksForProject(project.id);
+                        
+                        // 【核心修复】直接比较 ID，不再用字符串拼接，解决小圆点不显示问题
+                        final bool isProjectTracking = _activeTrackingEntry?.project.id == project.id && _activeTrackingEntry?.task == null;
 
-                        // 1. 无子项，显示单个按钮
                         if (subTasks.isEmpty) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: ProjectButton(
                               project: project,
+                              isTracking: isProjectTracking,
                               onTap: () => _applyEntry(project),
-                              // 【关键点】长按编辑项目
                               onLongPress: () {
                                 showDialog(
                                   context: context,
@@ -524,7 +556,6 @@ class _HomePageState extends State<HomePage> {
                           );
                         }
 
-                        // 2. 有子项，显示列表
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -532,8 +563,8 @@ class _HomePageState extends State<HomePage> {
                               padding: const EdgeInsets.symmetric(horizontal: 4),
                               child: ProjectButton(
                                 project: project,
+                                isTracking: isProjectTracking,
                                 onTap: () => _applyEntry(project),
-                                // 【关键点】长按编辑项目
                                 onLongPress: () {
                                   showDialog(
                                     context: context,
@@ -542,10 +573,16 @@ class _HomePageState extends State<HomePage> {
                                 },
                               ),
                             ),
-                            ...subTasks.map((task) => Padding(
-                              padding: const EdgeInsets.only(left: 12, right: 4, top: 4),
-                              child: _buildSubTaskButton(task, project),
-                            )),
+                            ...subTasks.map((task) {
+                              // 【核心修复】Task 比较逻辑
+                              final bool isTaskTracking = _activeTrackingEntry?.task?.id == task.id;
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 12, right: 4, top: 4),
+                                child: _buildSubTaskButton(task, project, 
+                                  isTracking: isTaskTracking
+                                ),
+                              );
+                            }),
                           ],
                         );
                       },
@@ -555,8 +592,7 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-
-          // 2. 底部弹出操作栏
+          
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
@@ -569,7 +605,7 @@ class _HomePageState extends State<HomePage> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -2))
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, -2))
                 ],
               ),
               child: Row(
@@ -602,7 +638,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // 3. 底部弹出：撤销按钮
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             curve: Curves.elasticOut,
@@ -632,7 +667,6 @@ class _HomePageState extends State<HomePage> {
           builder: (c) => ProjectEntryDialog(
             title: '新增事件',
             confirmText: '添加',
-            // 获取已有名称用于查重
             existingNames: _dataManager.projects.map((p) => p.name).toList(),
             onSubmit: (name, color) {
               _dataManager.addProject(name, color);
@@ -654,13 +688,39 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSubTaskButton(Task task, Project parentProject) {
+  Widget _buildSubTaskButton(Task task, Project parentProject, {bool isTracking = false}) {
+    // 【核心修复】改为无状态组件，确保圆点显示
+    return _SubTaskButton(
+      task: task,
+      parentProject: parentProject,
+      isTracking: isTracking,
+      onTap: () => _applyEntry(parentProject, task),
+    );
+  }
+}
+
+// 无状态组件，显示静态圆点
+class _SubTaskButton extends StatelessWidget {
+  final Task task;
+  final Project parentProject;
+  final bool isTracking;
+  final VoidCallback onTap;
+
+  const _SubTaskButton({
+    required this.task,
+    required this.parentProject,
+    required this.isTracking,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Material(
       color: parentProject.color,
       borderRadius: BorderRadius.circular(4),
       elevation: 1, 
       child: InkWell(
-        onTap: () => _applyEntry(parentProject, task),
+        onTap: onTap,
         borderRadius: BorderRadius.circular(4),
         child: Container(
           width: double.infinity,
@@ -672,6 +732,12 @@ class _HomePageState extends State<HomePage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // 【核心修复】如果 tracking，显示圆点
+              if (isTracking) 
+                const Padding(
+                  padding: EdgeInsets.only(right: 2), 
+                  child: Icon(Icons.fiber_manual_record, size: 8, color: Colors.white),
+                ),
               const Icon(Icons.subdirectory_arrow_right, size: 12, color: Colors.white70),
               const SizedBox(width: 2),
               Flexible(

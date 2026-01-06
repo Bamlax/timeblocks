@@ -81,7 +81,7 @@ class _TrendsPageState extends State<TrendsPage> {
     } else if (_selectedPeriod == TrendPeriod.year) {
       return "${_anchorDate.year}年";
     } else {
-      return "有史以来 (按天)";
+      return "有史以来";
     }
   }
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants.dart';
-import '../data_manager.dart';
+import '../data_manager.dart'; 
 import '../models/project.dart';
 import '../models/time_entry.dart';
 
@@ -10,7 +10,7 @@ class HourRow extends StatelessWidget {
   final Set<int> selectedMinutes;
   final bool isCurrentHourRow;
   final DateTime now;
-  final int timeBlockDuration; // 【新增】接收间隔
+  final int timeBlockDuration;
 
   const HourRow({
     super.key,
@@ -19,7 +19,7 @@ class HourRow extends StatelessWidget {
     required this.selectedMinutes,
     required this.isCurrentHourRow,
     required this.now,
-    required this.timeBlockDuration, // 【新增】
+    required this.timeBlockDuration,
   });
 
   String _formatDate(DateTime date) {
@@ -34,7 +34,7 @@ class HourRow extends StatelessWidget {
     final bool isNewDay = currentHour == 0;
     final int rowBaseMinute = hourIndex * 60;
 
-    // 【新增】计算一小时有多少个块
+    // 当前设置下的块数 (用于网格和选中状态)
     final int blocksPerHour = 60 ~/ timeBlockDuration;
 
     return Container(
@@ -71,14 +71,17 @@ class HourRow extends StatelessWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final double totalWidth = constraints.maxWidth;
-                // 【修改】根据块数动态计算宽度
+                
+                // 1. 用于【显示内容】的最小单位宽度 (1分钟)
+                final double oneMinuteWidth = totalWidth / 60.0;
+                
+                // 2. 用于【网格和选中】的块宽度 (当前间隔)
                 final double blockWidth = totalWidth / blocksPerHour;
 
                 return Stack(
                   children: [
-                    // 1. 基础网格线
+                    // Layer 1: 基础网格线 (遵循 timeBlockDuration)
                     Row(
-                      // 【修改】使用 blocksPerHour
                       children: List.generate(blocksPerHour, (_) => Container(
                         width: blockWidth,
                         height: double.infinity,
@@ -87,13 +90,16 @@ class HourRow extends StatelessWidget {
                         ),
                       )),
                     ),
-                    // 2. 颜色项目层
-                    ..._buildMergedProjectBlocks(rowBaseMinute, blockWidth, blocksPerHour),
-                    // 3. 选中状态层
+                    
+                    // Layer 2: 颜色项目层 (核心修改：始终按 1分钟 精度渲染)
+                    // 这样即使在大间隔视图下，也能精确看到小块数据
+                    ..._buildHighFidelityBlocks(rowBaseMinute, oneMinuteWidth),
+                    
+                    // Layer 3: 选中状态层 (遵循 timeBlockDuration，反馈用户操作范围)
                     Row(
                       children: List.generate(blocksPerHour, (i) {
-                        // 【修改】计算分钟数
-                        final isSelected = selectedMinutes.contains(rowBaseMinute + i * timeBlockDuration);
+                        final startMinute = rowBaseMinute + i * timeBlockDuration;
+                        final isSelected = selectedMinutes.contains(startMinute);
                         return Container(
                           width: blockWidth,
                           height: double.infinity,
@@ -101,7 +107,8 @@ class HourRow extends StatelessWidget {
                         );
                       }),
                     ),
-                    // 4. 当前时间小竖条
+                    
+                    // Layer 4: 当前时间线
                     if (isCurrentHourRow)
                       Builder(
                         builder: (context) {
@@ -142,20 +149,21 @@ class HourRow extends StatelessWidget {
     );
   }
 
-  // 【修改】合并逻辑适配动态间隔
-  List<Widget> _buildMergedProjectBlocks(int rowBaseMinute, double blockWidth, int blocksPerHour) {
+  // 【核心修改】高保真渲染：基于1分钟精度合并
+  List<Widget> _buildHighFidelityBlocks(int rowBaseMinute, double oneMinuteWidth) {
     List<Widget> blocks = [];
     int i = 0;
     final DataManager dm = DataManager();
 
-    while (i < blocksPerHour) {
-      final int currentMinute = rowBaseMinute + (i * timeBlockDuration);
+    while (i < 60) {
+      final int currentMinute = rowBaseMinute + i;
       final TimeEntry? entry = timeData[currentMinute];
       
       if (entry != null) {
         int j = i + 1;
-        while (j < blocksPerHour) {
-          final int nextMinute = rowBaseMinute + (j * timeBlockDuration);
+        // 寻找连续的、相同的1分钟块
+        while (j < 60) {
+          final int nextMinute = rowBaseMinute + j;
           final TimeEntry? nextEntry = timeData[nextMinute];
           
           if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) {
@@ -164,46 +172,53 @@ class HourRow extends StatelessWidget {
           j++;
         }
         
-        final int blockCount = j - i;
+        final int durationInMinutes = j - i;
         final tag = dm.getTagById(entry.tagId);
 
         blocks.add(Positioned(
-          left: i * blockWidth,
+          left: i * oneMinuteWidth,
           top: 0, bottom: 0,
-          width: blockCount * blockWidth,
+          width: durationInMinutes * oneMinuteWidth,
           child: Container(
             decoration: BoxDecoration(
               color: entry.project.color,
-              border: const Border(
+              // 分割线：只有当这块结束的地方不是 60 分时，才画右白线
+              border: (j < 60) ? const Border(
                 right: BorderSide(color: Colors.white, width: 1.0),
-              ),
+              ) : null,
             ),
             alignment: Alignment.center,
-            child: blockCount >= 1 // 原来是>1，现在可能块很大，>=1 也可以显示
+            // 只有宽度足够时才显示文字 (例如大于2分钟宽度)
+            // 你可以根据实际效果调整这个阈值，或者使用 FittedBox
+            child: durationInMinutes >= 2 
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        entry.displayName, 
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          shadows: [Shadow(blurRadius: 2, color: Colors.black26, offset: Offset(0, 1))]
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                      if (tag != null)
-                        Text(
-                          "#${tag.name}",
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
-                            fontSize: 9,
-                            fontStyle: FontStyle.italic,
+                      Flexible(
+                        child: Text(
+                          entry.displayName, 
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10, // 字体稍微调小以适应精细块
+                            fontWeight: FontWeight.bold,
+                            shadows: [Shadow(blurRadius: 2, color: Colors.black26, offset: Offset(0, 1))]
                           ),
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
+                        ),
+                      ),
+                      if (tag != null)
+                        Flexible(
+                          child: Text(
+                            "#${tag.name}",
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 8,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
                         ),
                     ],
                   )

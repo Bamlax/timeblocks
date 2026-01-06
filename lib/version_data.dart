@@ -19,6 +19,16 @@ class VersionRecord {
 
 const List<VersionRecord> appVersionHistory = [
     VersionRecord(
+    version: '0.7.0',
+    date: '2026-1-7',
+    updates: [
+      '新增可调整块的大小',
+      '新增自动填充块的内容功能',
+      '修复调整块大小时数据丢失的问题',
+    ],
+    isLatest: true,
+  ),
+    VersionRecord(
     version: '0.6.0',
     date: '2026-1-6',
     updates: [
@@ -26,7 +36,7 @@ const List<VersionRecord> appVersionHistory = [
       '新增长按事件可编辑的功能',
       '调整趋势中全部的逻辑',
     ],
-    isLatest: true,
+    isLatest: false,
   ),
     VersionRecord(
     version: '0.5.0',

@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import '../constants.dart';
 import '../data_manager.dart';
 import '../models/project.dart';
-import '../models/task.dart';
-import 'color_picker.dart'; // 复用之前的取色器
+import 'color_picker.dart'; 
 
 class ProjectEditDialog extends StatefulWidget {
   final Project project;
@@ -33,7 +32,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
     super.dispose();
   }
 
-  // 保存基础信息（名、色）
   void _saveBasicInfo() {
     if (_nameController.text.trim().isNotEmpty) {
       _dataManager.updateProject(
@@ -45,7 +43,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
     }
   }
 
-  // 删除项目
   void _deleteProject() {
     showDialog(
       context: context,
@@ -57,8 +54,8 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
           TextButton(
             onPressed: () {
               _dataManager.removeProject(widget.project.id);
-              Navigator.pop(ctx); // 关确认框
-              Navigator.pop(context); // 关编辑框
+              Navigator.pop(ctx); 
+              Navigator.pop(context);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('删除'),
@@ -68,7 +65,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
     );
   }
 
-  // 添加子任务
   void _addTask() {
     String newTaskName = "";
     showDialog(
@@ -87,7 +83,7 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
               if (newTaskName.trim().isNotEmpty) {
                 _dataManager.addTask(newTaskName.trim(), widget.project.id);
                 Navigator.pop(ctx);
-                setState(() {}); // 刷新列表
+                setState(() {}); 
               }
             },
             child: const Text('添加'),
@@ -99,7 +95,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // 获取当前项目的任务列表（用于排序显示）
     final subTasks = _dataManager.getTasksForProject(widget.project.id);
 
     return Dialog(
@@ -112,7 +107,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 标题
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -131,7 +125,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. 修改名称
                     TextField(
                       controller: _nameController,
                       decoration: const InputDecoration(
@@ -142,7 +135,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
                     ),
                     const SizedBox(height: 16),
 
-                    // 2. 修改颜色
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -183,7 +175,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
                     
                     const SizedBox(height: 24),
                     
-                    // 3. 子内容管理 (排序 + 新增)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -196,7 +187,7 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
                       ],
                     ),
                     Container(
-                      height: 150, // 固定高度给列表
+                      height: 150,
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey.shade200),
                         borderRadius: BorderRadius.circular(8),
@@ -209,7 +200,7 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
                             itemCount: subTasks.length,
                             onReorder: (oldIndex, newIndex) {
                               _dataManager.reorderProjectTasks(widget.project.id, oldIndex, newIndex);
-                              setState(() {}); // 刷新界面
+                              setState(() {}); 
                             },
                             itemBuilder: (context, index) {
                               final task = subTasks[index];
@@ -233,7 +224,6 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
             ),
             
             const SizedBox(height: 16),
-            // 底部按钮
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -255,7 +245,8 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
   }
 
   Widget _buildColorCircle(Color color) {
-    final bool isSelected = _selectedColor.value == color.value;
+    // 【修复点】直接比较 Color 对象，修复弃用警告
+    final bool isSelected = _selectedColor == color;
     return GestureDetector(
       onTap: () => setState(() => _selectedColor = color),
       child: Container(
