@@ -154,16 +154,33 @@ class _HomePageState extends State<HomePage> {
     if (currentIndex == -1) currentIndex = 2; 
 
     int targetIndex = currentIndex;
-    // 调整灵敏度
+    
+    // 外张 (Scale > 1) -> 缩小视图 (粒度变小，如 5 -> 1) -> 索引减小
     if (details.scale > 1.3) {
       targetIndex = (currentIndex - 1).clamp(0, _zoomLevels.length - 1);
-    } else if (details.scale < 0.7) {
+    } 
+    // 捏合 (Scale < 1) -> 放大视图 (粒度变大，如 1 -> 5) -> 索引增加
+    else if (details.scale < 0.7) {
       targetIndex = (currentIndex + 1).clamp(0, _zoomLevels.length - 1);
     }
+    
     final int newDuration = _zoomLevels[targetIndex];
+    
     if (newDuration != _dataManager.timeBlockDuration) {
       _dataManager.updateTimeBlockDuration(newDuration);
       _clearSelection();
+      
+      // 提示
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("时间粒度：$newDuration 分钟"),
+          duration: const Duration(milliseconds: 800),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.all(50), 
+        ),
+      );
     }
   }
 

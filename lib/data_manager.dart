@@ -11,6 +11,7 @@ class DataManager extends ChangeNotifier {
   factory DataManager() => _instance;
   DataManager._internal();
 
+  // 核心时间数据 (1分钟精度)
   final Map<int, TimeEntry> timeData = {};
 
   List<Project> projects = [
@@ -31,6 +32,7 @@ class DataManager extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     timeBlockDuration = prefs.getInt('timeBlockDuration') ?? 5;
 
+    // ... (加载 Projects, Tasks, Tags 的代码保持不变) ...
     final String? projectsJson = prefs.getString('projects');
     if (projectsJson != null) {
       try {
@@ -39,7 +41,6 @@ class DataManager extends ChangeNotifier {
         projects.removeWhere((p) => p.id == 'clear');
       } catch (e) { debugPrint("Error projects: $e"); }
     }
-
     final String? tasksJson = prefs.getString('tasks');
     if (tasksJson != null) {
       try {
@@ -47,7 +48,6 @@ class DataManager extends ChangeNotifier {
         tasks = decoded.map((e) => Task.fromJson(e)).toList();
       } catch (e) { debugPrint("Error tasks: $e"); }
     }
-
     final String? tagsJson = prefs.getString('tags');
     if (tagsJson != null) {
       try {
@@ -56,6 +56,7 @@ class DataManager extends ChangeNotifier {
       } catch (e) { debugPrint("Error tags: $e"); }
     }
 
+    // 加载 TimeData
     final String? timeDataJson = prefs.getString('timeData');
     if (timeDataJson != null) {
       try {
@@ -78,7 +79,45 @@ class DataManager extends ChangeNotifier {
         });
       } catch (e) { debugPrint("Error timeData: $e"); }
     }
+
+    // 【新增】数据修复逻辑：处理旧版数据的空隙
+    _repairLegacyData();
+
     notifyListeners();
+  }
+
+  // 【核心修复】自动填充空隙
+  // 如果当前是 5分钟模式，且 10:00 有数据，但 10:01-10:04 没数据，则自动填充
+  void _repairLegacyData() {
+    bool hasChanges = false;
+    // 遍历所有可能的起始点（根据当前粒度）
+    // 注意：这里假设一天 1440 分钟，如果无限滚动，逻辑类似，只需遍历已有的 keys
+    
+    // 为了效率，我们只遍历 timeData 中已有的 key
+    final List<int> existingKeys = timeData.keys.toList();
+    
+    for (final int index in existingKeys) {
+      // 如果这个 key 是一个块的起始点 (比如 0, 5, 10...)
+      if (index % timeBlockDuration == 0) {
+        final TimeEntry? entry = timeData[index];
+        if (entry != null) {
+          // 检查该块后续的分钟是否为空
+          for (int i = 1; i < timeBlockDuration; i++) {
+            final int subIndex = index + i;
+            if (!timeData.containsKey(subIndex)) {
+              // 发现空隙，填充它
+              timeData[subIndex] = entry;
+              hasChanges = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (hasChanges) {
+      debugPrint("Legacy data repaired.");
+      _save(); // 保存修复后的数据
+    }
   }
 
   Future<void> _save() async {
@@ -95,7 +134,8 @@ class DataManager extends ChangeNotifier {
     await prefs.setString('timeData', jsonEncode(timeDataMap));
   }
 
-  // --- 时间块操作 ---
+  // ... (updateTimeBlockDuration, batchUpdate 等其他方法保持不变，省略以节省篇幅) ...
+  // 请确保 updateTimeBlockDuration 依然是只更新变量不清洗数据
   void updateTimeBlockDuration(int newDuration) {
     if (timeBlockDuration == newDuration) return;
     timeBlockDuration = newDuration;
@@ -115,13 +155,8 @@ class DataManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Project 操作 ---
-  void addProject(String name, Color color) {
-    projects.add(Project(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, color: color));
-    _save();
-    notifyListeners();
-  }
-
+  // 请保留原有的 Project, Task, Tag 的 CRUD 方法
+  void addProject(String name, Color color) { projects.add(Project(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, color: color)); _save(); notifyListeners(); }
   void updateProject(String id, String newName, Color newColor) {
     final index = projects.indexWhere((p) => p.id == id);
     if (index != -1) {
@@ -132,27 +167,21 @@ class DataManager extends ChangeNotifier {
           timeData[key] = TimeEntry(project: newProject, task: entry.task, tagId: entry.tagId);
         }
       });
-      _save();
-      notifyListeners();
+      _save(); notifyListeners();
     }
   }
-
   void removeProject(String id) {
     projects.removeWhere((p) => p.id == id);
     tasks.removeWhere((t) => t.projectId == id);
     timeData.removeWhere((key, value) => value.project.id == id);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
   void reorderProjects(int oldIndex, int newIndex) {
     if (oldIndex < newIndex) newIndex -= 1;
     final Project item = projects.removeAt(oldIndex);
     projects.insert(newIndex, item);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
   void mergeProjects(String sourceId, String targetId) {
     final targetProject = getProjectById(targetId);
     if (targetProject == null) return;
@@ -167,21 +196,11 @@ class DataManager extends ChangeNotifier {
       }
     });
     projects.removeWhere((p) => p.id == sourceId);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
+  Project? getProjectById(String id) { try { return projects.firstWhere((p) => p.id == id); } catch (_) { return null; } }
 
-  Project? getProjectById(String id) {
-    try { return projects.firstWhere((p) => p.id == id); } catch (_) { return null; }
-  }
-
-  // --- Task 操作 ---
-  void addTask(String name, String projectId) {
-    tasks.add(Task(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, projectId: projectId));
-    _save();
-    notifyListeners();
-  }
-
+  void addTask(String name, String projectId) { tasks.add(Task(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, projectId: projectId)); _save(); notifyListeners(); }
   void updateTask(String taskId, String newName, String newProjectId) {
     final index = tasks.indexWhere((t) => t.id == taskId);
     if (index != -1) {
@@ -195,35 +214,20 @@ class DataManager extends ChangeNotifier {
           }
         });
       }
-      _save();
-      notifyListeners();
+      _save(); notifyListeners();
     }
   }
-
-  void removeTask(String taskId) {
-    tasks.removeWhere((t) => t.id == taskId);
-    _save();
-    notifyListeners();
-  }
-
-  // 【核心修复】添加了之前遗漏的 reorderProjectTasks 方法
+  void removeTask(String taskId) { tasks.removeWhere((t) => t.id == taskId); _save(); notifyListeners(); }
   void reorderProjectTasks(String projectId, int oldIndex, int newIndex) {
-    if (oldIndex < newIndex) {
-      newIndex -= 1;
-    }
+    if (oldIndex < newIndex) newIndex -= 1;
     final projectTasks = tasks.where((t) => t.projectId == projectId).toList();
     if (oldIndex >= projectTasks.length) return;
-
     final Task item = projectTasks.removeAt(oldIndex);
     projectTasks.insert(newIndex, item);
-
     final otherTasks = tasks.where((t) => t.projectId != projectId).toList();
     tasks = [...otherTasks, ...projectTasks];
-
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
   void mergeTasks(String sourceTaskId, String targetTaskId) {
     Task? targetTask;
     try { targetTask = tasks.firstWhere((t) => t.id == targetTaskId); } catch (_) {}
@@ -236,26 +240,15 @@ class DataManager extends ChangeNotifier {
       }
     });
     tasks.removeWhere((t) => t.id == sourceTaskId);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
+  List<Task> getTasksForProject(String projectId) { return tasks.where((t) => t.projectId == projectId).toList(); }
 
-  List<Task> getTasksForProject(String projectId) {
-    return tasks.where((t) => t.projectId == projectId).toList();
-  }
-
-  // --- Tag 操作 ---
-  void addTag(String name) {
-    tags.add(Tag(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name));
-    _save();
-    notifyListeners();
-  }
-  
+  void addTag(String name) { tags.add(Tag(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name)); _save(); notifyListeners(); }
   void updateTag(String id, String newName) {
     final index = tags.indexWhere((t) => t.id == id);
     if (index != -1) { tags[index] = Tag(id: id, name: newName); _save(); notifyListeners(); }
   }
-
   void mergeTags(String sourceId, String targetId) {
     timeData.forEach((key, entry) {
       if (entry.tagId == sourceId) {
@@ -263,18 +256,8 @@ class DataManager extends ChangeNotifier {
       }
     });
     tags.removeWhere((t) => t.id == sourceId);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
-  void removeTag(String id) {
-    tags.removeWhere((t) => t.id == id);
-    _save();
-    notifyListeners();
-  }
-  
-  Tag? getTagById(String? id) {
-    if (id == null) return null;
-    try { return tags.firstWhere((t) => t.id == id); } catch (_) { return null; }
-  }
+  void removeTag(String id) { tags.removeWhere((t) => t.id == id); _save(); notifyListeners(); }
+  Tag? getTagById(String? id) { if (id == null) return null; try { return tags.firstWhere((t) => t.id == id); } catch (_) { return null; } }
 }

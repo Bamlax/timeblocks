@@ -307,15 +307,16 @@ class _StatView extends StatelessWidget {
         }
       }
 
-      // 统计当前
+      // 统计当前周期
       if (minuteIndex >= startMin && minuteIndex < endMin) {
+        // 【核心修改】直接 +1 分钟
         durationMap[id] = (durationMap[id] ?? 0) + 1;
         colorMap[id] = color;
         nameMap[id] = name;
-        totalMinutesInRange += 5; 
+        totalMinutesInRange += 1; 
       }
 
-      // 统计上期
+      // 统计上一个周期
       if (prevStartMin != null && prevEndMin != null && minuteIndex >= prevStartMin && minuteIndex < prevEndMin) {
         prevDurationMap[id] = (prevDurationMap[id] ?? 0) + 1;
       }
@@ -335,10 +336,10 @@ class _StatView extends StatelessWidget {
     }
 
     List<_StatItem> items = durationMap.keys.map((id) {
-      final int blocks = durationMap[id]!;
-      final int prevBlocks = prevDurationMap[id] ?? 0;
-      final int minutes = blocks * 5;
-      final int prevMinutes = prevBlocks * 5;
+      // 【核心修改】count 就是分钟数
+      final int minutes = durationMap[id]!;
+      final int prevMinutes = prevDurationMap[id] ?? 0;
+      
       final double percentage = minutes / totalMinutesInRange;
       
       return _StatItem(
@@ -353,6 +354,7 @@ class _StatView extends StatelessWidget {
 
     items.sort((a, b) => b.minutes.compareTo(a.minutes));
 
+    // 标签着色
     if (type == _StatType.tag && items.isNotEmpty) {
       items = List.generate(items.length, (index) {
         final item = items[index];
@@ -373,7 +375,7 @@ class _StatView extends StatelessWidget {
 
     return Column(
       children: [
-        // 顶部总时长
+        // 顶部总时长 (移除总日均)
         Container(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
           color: Colors.grey.shade50,
@@ -410,7 +412,7 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
   final String projectName;
   final Color projectColor;
   final DateTimeRange range;
-  final TimeRange timeRangeType; // 新增
+  final TimeRange timeRangeType;
   final bool showPieChart;
 
   const ProjectDetailStatisticsPage({
@@ -427,7 +429,7 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final DataManager dataManager = DataManager();
     final Map<String, int> durationMap = {};
-    final Map<String, int> prevDurationMap = {}; // 上期数据
+    final Map<String, int> prevDurationMap = {}; 
     final Map<String, String> nameMap = {};
     
     int totalProjectMinutes = 0;
@@ -444,16 +446,16 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
     }
 
     dataManager.timeData.forEach((minuteIndex, entry) {
-      // 筛选当前项目
       if (entry.project.id == projectId) {
         final String taskId = entry.task?.id ?? "uncategorized";
         final String taskName = entry.task?.name ?? "（无内容）";
 
         // 当前周期
         if (minuteIndex >= startMin && minuteIndex < endMin) {
+          // 【核心修改】 +1
           durationMap[taskId] = (durationMap[taskId] ?? 0) + 1;
           nameMap[taskId] = taskName;
-          totalProjectMinutes += 5;
+          totalProjectMinutes += 1;
         }
 
         // 上个周期
@@ -471,10 +473,9 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
     }
 
     List<_StatItem> items = durationMap.keys.map((id) {
-      final int blocks = durationMap[id]!;
-      final int prevBlocks = prevDurationMap[id] ?? 0;
-      final int minutes = blocks * 5;
-      final int prevMinutes = prevBlocks * 5;
+      // 【核心修改】 minutes = count
+      final int minutes = durationMap[id]!;
+      final int prevMinutes = prevDurationMap[id] ?? 0;
       final double percentage = minutes / totalProjectMinutes;
       
       return _StatItem(
@@ -516,7 +517,29 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // 详情页这里去掉了顶部的总览面板
+          // 详情页也移除了总日均，只保留总时长
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            color: Colors.grey.shade50,
+            width: double.infinity,
+            child: Center(
+              child: Column(
+                children: [
+                  Text(
+                    "项目总时长",
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatDuration(totalProjectMinutes),
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: projectColor),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          
           Expanded(
             child: showPieChart
                 ? _PieChartView(items: items, days: days)
@@ -526,6 +549,13 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
       ),
     );
   }
+
+  String _formatDuration(int minutes) {
+    final int h = minutes ~/ 60;
+    final int m = minutes % 60;
+    if (h > 0) return "${h}h ${m}m";
+    return "${m}m";
+  }
 }
 
 // --- 复用组件 ---
@@ -533,7 +563,7 @@ class ProjectDetailStatisticsPage extends StatelessWidget {
 class _BarListView extends StatelessWidget {
   final List<_StatItem> items;
   final int days;
-  final _StatType? type; // 可选，用于判断点击事件
+  final _StatType? type;
   final TimeRange? timeRangeType;
   final DateTimeRange? range;
   final bool? showPieChart;
@@ -555,7 +585,6 @@ class _BarListView extends StatelessWidget {
       separatorBuilder: (c, i) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final item = items[index];
-        // 只有在主页面且类型为 Project 时才允许点击
         final bool canTap = type == _StatType.project && timeRangeType != null && range != null && showPieChart != null;
 
         return InkWell(
@@ -591,7 +620,10 @@ class _BarListView extends StatelessWidget {
                     children: [
                       Text(_formatDuration(item.minutes), style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w600)),
                       if (days > 1) 
-                        Text("日均: ${_formatDuration(item.minutes ~/ days)}", style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                        Text(
+                          "日均: ${_formatDuration(item.minutes ~/ days)}",
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                        ),
                     ],
                   ),
                 ],
@@ -610,10 +642,9 @@ class _BarListView extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const SizedBox(), // Spacer
+                  const SizedBox(),
                   Row(
                     children: [
-                      // 显示对比
                       _ComparisonWidget(item: item),
                       const SizedBox(width: 8),
                       Text(
