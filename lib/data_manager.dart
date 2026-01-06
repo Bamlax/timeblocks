@@ -237,4 +237,35 @@ class DataManager extends ChangeNotifier {
   }
   void removeTag(String id) { tags.removeWhere((t) => t.id == id); _save(); notifyListeners(); }
   Tag? getTagById(String? id) { if (id == null) return null; try { return tags.firstWhere((t) => t.id == id); } catch (_) { return null; } }
+
+  void reorderProjectTasks(String projectId, int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+
+    // 1. 找出所有属于该项目的任务
+    final projectTasks = tasks.where((t) => t.projectId == projectId).toList();
+    
+    // 2. 在局部列表中进行移动
+    final Task item = projectTasks.removeAt(oldIndex);
+    projectTasks.insert(newIndex, item);
+
+    // 3. 重组全局 tasks 列表
+    // 策略：保留非本项目任务的相对位置，将本项目任务按新顺序替换回去
+    // 简单实现：先移除所有该项目的任务，再把排好序的加到最后（或者保持原位置复杂点）
+    
+    // 为了保持简单且有效：我们创建一个新列表
+    List<Task> newGlobalTasks = [];
+    
+    // 把非本项目的任务加进去
+    newGlobalTasks.addAll(tasks.where((t) => t.projectId != projectId));
+    
+    // 把本项目重排后的任务加进去 (这样本项目任务会跑到列表末尾，但在UI筛选显示时顺序是对的)
+    // 如果想保持插入位置不变比较复杂，考虑到 displayOrder 通常由 UI 过滤决定，这样是可以的。
+    newGlobalTasks.addAll(projectTasks);
+
+    tasks = newGlobalTasks;
+    _save();
+    notifyListeners();
+  }
 }

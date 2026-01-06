@@ -6,13 +6,18 @@ import 'models/time_entry.dart';
 import 'models/project.dart';
 import 'models/task.dart';
 import 'widgets/hour_row.dart';
-import 'widgets/project_entry_dialog.dart';
+import 'widgets/project_entry_dialog.dart'; // 用于新增
+import 'widgets/project_edit_dialog.dart';  // 【新增】用于长按编辑
 import 'widgets/project_button.dart';
 import 'widgets/app_drawer.dart';
 
 void main() async {
+  // 1. 确保 Flutter 绑定初始化
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 2. 启动前先加载本地保存的数据
   await DataManager().init();
+
   runApp(const TimeBlockApp());
 }
 
@@ -54,11 +59,19 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final DataManager _dataManager = DataManager();
+  
+  // 用于手动控制 Scaffold (打开侧边栏)
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  
   final Set<int> _selectedMinutes = {};
+  
+  // 记录拖拽开始时的分钟索引 (用于范围选择)
   int? _dragStartIndex;
+  
+  // 撤销功能相关
   Map<int, TimeEntry?>? _undoSnapshot; 
   bool _showUndoButton = false;        
+
   late ScrollController _scrollController;
   Timer? _timer;
   final GlobalKey _listViewKey = GlobalKey();
@@ -89,6 +102,7 @@ class _HomePageState extends State<HomePage> {
     final now = DateTime.now();
     final int hoursDiff = now.difference(kAnchorDate).inHours;
     double offset = hoursDiff * kHourHeight;
+    // 视觉修正：让当前时间位于屏幕上方约 300 像素处
     offset -= 300; 
     return offset < 0 ? 0 : offset;
   }
@@ -102,11 +116,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- 手势计算逻辑 (适配动态间隔) ---
+  // --- 手势计算逻辑 ---
   int? _calculateMinuteFromOffset(Offset localPosition) {
     final RenderBox? renderBox = _listViewKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return null;
     
+    // 必须与 HourRow 中的设置保持一致 (当前是 45.0)
     const double timeLabelWidth = 45.0; 
     if (localPosition.dx <= timeLabelWidth) return null;
 
@@ -118,7 +133,7 @@ class _HomePageState extends State<HomePage> {
 
     final double totalGridWidth = renderBox.size.width - timeLabelWidth;
     
-    // 【核心修改】动态计算列数
+    // 动态计算列数
     final int duration = _dataManager.timeBlockDuration;
     final int blocksPerHour = 60 ~/ duration;
     final double blockWidth = totalGridWidth / blocksPerHour;
@@ -127,9 +142,10 @@ class _HomePageState extends State<HomePage> {
     if (blockIndex < 0) blockIndex = 0;
     if (blockIndex >= blocksPerHour) blockIndex = blocksPerHour - 1;
 
-    // 计算绝对分钟：小时 * 60 + 第几块 * 间隔
     return hourIndex * 60 + blockIndex * duration;
   }
+
+  // --- 撤销逻辑 ---
 
   void _recordUndoSnapshot() {
     _undoSnapshot = {};
@@ -138,7 +154,11 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _showUndo() => setState(() => _showUndoButton = true);
+  void _showUndo() {
+    setState(() {
+      _showUndoButton = true;
+    });
+  }
 
   void _dismissUndo() {
     if (_showUndoButton) {
@@ -153,19 +173,28 @@ class _HomePageState extends State<HomePage> {
     if (_undoSnapshot != null) {
       _dataManager.batchUpdate(_undoSnapshot!);
       _dismissUndo();
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("已撤销更改"), duration: Duration(milliseconds: 600), behavior: SnackBarBehavior.floating)
+        const SnackBar(
+          content: Text("已撤销更改"), 
+          duration: Duration(milliseconds: 600),
+          behavior: SnackBarBehavior.floating,
+        )
       );
     }
   }
 
+  // --- 手势与应用逻辑 ---
+
   void _handleTap(Offset localPosition) {
     _dismissUndo(); 
+
     final int? minute = _calculateMinuteFromOffset(localPosition);
     if (minute == null) {
       _clearSelection();
       return;
     }
+
     setState(() {
       if (_selectedMinutes.contains(minute)) {
         _selectedMinutes.remove(minute);
@@ -176,12 +205,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleGlobalGesture(Offset localPosition, {bool isStart = false}) {
-    if (isStart) _dismissUndo(); 
+    if (isStart) {
+      _dismissUndo(); 
+    }
 
     final int? currentMinute = _calculateMinuteFromOffset(localPosition);
     if (currentMinute == null) return;
 
-    // 【新增】获取当前的时间间隔
+    // 获取当前间隔步长
     final int step = _dataManager.timeBlockDuration;
 
     setState(() {
@@ -191,13 +222,14 @@ class _HomePageState extends State<HomePage> {
         _selectedMinutes.add(currentMinute);
       } else {
         if (_dragStartIndex == null) return;
+        
         _selectedMinutes.clear(); 
+        
         int start = _dragStartIndex!;
         int end = currentMinute;
         if (start > end) {
           final temp = start; start = end; end = temp;
         }
-        // 【核心修改】循环步进改为动态间隔
         for (int i = start; i <= end; i += step) {
           _selectedMinutes.add(i);
         }
@@ -207,6 +239,7 @@ class _HomePageState extends State<HomePage> {
 
   void _clearSelection() {
     _dismissUndo(); 
+
     if (_selectedMinutes.isNotEmpty) {
       setState(() {
         _selectedMinutes.clear();
@@ -217,7 +250,9 @@ class _HomePageState extends State<HomePage> {
 
   void _applyEntry(Project? project, [Task? task]) {
     if (_selectedMinutes.isEmpty) return;
+    
     _recordUndoSnapshot();
+
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       if (project == null) {
@@ -226,17 +261,22 @@ class _HomePageState extends State<HomePage> {
         updates[index] = TimeEntry(project: project, task: task);
       }
     }
+    
     _dataManager.batchUpdate(updates);
+    
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    
     _showUndo();
   }
 
   void _applyTag(String? tagId) {
     if (_selectedMinutes.isEmpty) return;
+
     _recordUndoSnapshot();
+
     Map<int, TimeEntry?> updates = {};
     for (var index in _selectedMinutes) {
       final existingEntry = _dataManager.timeData[index];
@@ -244,11 +284,16 @@ class _HomePageState extends State<HomePage> {
         updates[index] = existingEntry.copyWith(tagId: tagId, clearTag: tagId == null);
       }
     }
-    if (updates.isNotEmpty) _dataManager.batchUpdate(updates);
+    
+    if (updates.isNotEmpty) {
+      _dataManager.batchUpdate(updates);
+    }
+    
     setState(() {
       _selectedMinutes.clear();
       _dragStartIndex = null;
     });
+    
     _showUndo();
   }
 
@@ -257,6 +302,7 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先在侧边栏创建标签")));
       return;
     }
+
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -297,7 +343,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 【新增】显示调整块大小的弹窗
   void _showBlockSizeDialog() {
     showModalBottomSheet(
       context: context,
@@ -309,15 +354,12 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Text("调整时间块大小", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
-              // 【修改点】加入了 1 分钟选项
               ...[1, 2, 5, 10, 20, 30].map((minutes) => ListTile(
                 title: Text("$minutes 分钟"),
-                // 如果是当前选中的，显示对勾
                 trailing: _dataManager.timeBlockDuration == minutes 
                     ? const Icon(Icons.check, color: Colors.blue) 
                     : null,
                 onTap: () {
-                  // 更新设置并清空当前选区 (防止对不齐)
                   _dataManager.updateTimeBlockDuration(minutes);
                   _clearSelection();
                   Navigator.pop(ctx);
@@ -355,7 +397,6 @@ class _HomePageState extends State<HomePage> {
           child: const Text('Timeblocks'),
         ),
         centerTitle: true,
-        // 【新增】右上角菜单
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
@@ -394,11 +435,13 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Stack(
         children: [
+          // 1. 主体内容
           GestureDetector(
             onTap: _clearSelection, 
             behavior: HitTestBehavior.translucent,
             child: Row(
               children: [
+                // 左侧：时间网格
                 Expanded(
                   flex: 70,
                   child: GestureDetector(
@@ -429,7 +472,6 @@ class _HomePageState extends State<HomePage> {
                                 selectedMinutes: _selectedMinutes,
                                 isCurrentHourRow: isCurrentHourRow,
                                 now: now,
-                                // 【新增】传入当前的间隔
                                 timeBlockDuration: _dataManager.timeBlockDuration,
                               );
                             },
@@ -439,6 +481,8 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
+                
+                // 右侧：项目列表
                 Expanded(
                   flex: 30,
                   child: Container(
@@ -451,23 +495,36 @@ class _HomePageState extends State<HomePage> {
                       itemCount: _dataManager.projects.length + 1,
                       separatorBuilder: (c, i) => const SizedBox(height: 6),
                       itemBuilder: (context, index) {
+                        // 底部新增按钮
                         if (index == _dataManager.projects.length) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: _buildSimpleAddButton(),
                           );
                         }
+
                         final project = _dataManager.projects[index];
                         final subTasks = _dataManager.getTasksForProject(project.id);
+
+                        // 1. 无子项，显示单个按钮
                         if (subTasks.isEmpty) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: ProjectButton(
                               project: project,
                               onTap: () => _applyEntry(project),
+                              // 【关键点】长按编辑项目
+                              onLongPress: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (c) => ProjectEditDialog(project: project),
+                                );
+                              },
                             ),
                           );
                         }
+
+                        // 2. 有子项，显示列表
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -476,6 +533,13 @@ class _HomePageState extends State<HomePage> {
                               child: ProjectButton(
                                 project: project,
                                 onTap: () => _applyEntry(project),
+                                // 【关键点】长按编辑项目
+                                onLongPress: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (c) => ProjectEditDialog(project: project),
+                                  );
+                                },
                               ),
                             ),
                             ...subTasks.map((task) => Padding(
@@ -491,6 +555,8 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+
+          // 2. 底部弹出操作栏
           AnimatedPositioned(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
@@ -509,7 +575,6 @@ class _HomePageState extends State<HomePage> {
               child: Row(
                 children: [
                   Text(
-                    // 【修改】显示选中的总分钟数 (需基于选中块数量和当前间隔)
                     "已选 ${_selectedMinutes.length * _dataManager.timeBlockDuration} 分钟",
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
@@ -536,6 +601,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
+
+          // 3. 底部弹出：撤销按钮
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             curve: Curves.elasticOut,
@@ -565,6 +632,8 @@ class _HomePageState extends State<HomePage> {
           builder: (c) => ProjectEntryDialog(
             title: '新增事件',
             confirmText: '添加',
+            // 获取已有名称用于查重
+            existingNames: _dataManager.projects.map((p) => p.name).toList(),
             onSubmit: (name, color) {
               _dataManager.addProject(name, color);
             },
