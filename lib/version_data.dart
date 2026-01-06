@@ -22,8 +22,8 @@ const List<VersionRecord> appVersionHistory = [
     version: '0.7.0',
     date: '2026-1-7',
     updates: [
-      '新增可调整块的大小',
       '新增自动填充块的内容功能',
+      '优化块大小的调整逻辑（双指捏合）',
       '修复调整块大小时数据丢失的问题',
     ],
     isLatest: true,
@@ -44,7 +44,6 @@ const List<VersionRecord> appVersionHistory = [
     updates: [
       '新增查看所有时间的趋势',
       '优化统计图的绘制粗细',
-      '优化撤回的隐藏逻辑',
       '优化撤回的隐藏逻辑',
       '去除Timeblocks旁的符号',
     ],
