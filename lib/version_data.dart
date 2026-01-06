@@ -23,6 +23,7 @@ const List<VersionRecord> appVersionHistory = [
     date: '2026-1-6',
     updates: [
       '新增可调整块的大小',
+      '新增长按事件可编辑的功能',
       '调整趋势中全部的逻辑',
     ],
     isLatest: true,
