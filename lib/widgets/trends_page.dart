@@ -8,7 +8,6 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../models/tag.dart';
 
-// 【修改点】新增 all
 enum TrendPeriod { week, month, year, all }
 
 enum TargetType { project, task, tag }
@@ -82,7 +81,7 @@ class _TrendsPageState extends State<TrendsPage> {
     } else if (_selectedPeriod == TrendPeriod.year) {
       return "${_anchorDate.year}年";
     } else {
-      return "有史以来";
+      return "有史以来 (按天)";
     }
   }
 
@@ -230,7 +229,6 @@ class _TrendsPageState extends State<TrendsPage> {
               ButtonSegment(value: TrendPeriod.week, label: Text("周")),
               ButtonSegment(value: TrendPeriod.month, label: Text("月")),
               ButtonSegment(value: TrendPeriod.year, label: Text("年")),
-              // 【修改点】新增“全部”
               ButtonSegment(value: TrendPeriod.all, label: Text("全部")),
             ],
             selected: {_selectedPeriod},
@@ -317,8 +315,7 @@ class _TrendsPageState extends State<TrendsPage> {
     DateTime endRange;
     int maxX; 
     
-    // 【修改点】处理 "all" 模式
-    // 需要找到数据的最早时间点作为起点
+    // 获取数据中的最早时间 (用于 All 模式的起点)
     DateTime? firstRecordDate;
     if (_selectedPeriod == TrendPeriod.all && dm.timeData.isNotEmpty) {
       final int firstMin = dm.timeData.keys.reduce(math.min);
@@ -338,19 +335,20 @@ class _TrendsPageState extends State<TrendsPage> {
       endRange = DateTime(_anchorDate.year + 1, 1, 1);
       maxX = 12;
     } else {
-      // All
+      // 【修改点】All 模式 - 按天统计
       if (firstRecordDate == null) {
-        // 无数据时
         startRange = DateTime.now(); 
         endRange = DateTime.now();
         maxX = 1;
       } else {
-        // 从第一条记录的当月1号开始，到下个月1号结束
-        startRange = DateTime(firstRecordDate.year, firstRecordDate.month, 1);
+        // 从最早的那一天 00:00 开始
+        startRange = DateTime(firstRecordDate.year, firstRecordDate.month, firstRecordDate.day);
         final now = DateTime.now();
-        endRange = DateTime(now.year, now.month + 1, 1); // 包含本月
-        // 计算月数差作为 X 轴长度
-        maxX = (endRange.year - startRange.year) * 12 + (endRange.month - startRange.month);
+        // 结束于今天 23:59 (即明天 00:00)
+        endRange = DateTime(now.year, now.month, now.day).add(const Duration(days: 1));
+        
+        // 计算总天数
+        maxX = endRange.difference(startRange).inDays;
         if (maxX <= 0) maxX = 1;
       }
     }
@@ -382,22 +380,23 @@ class _TrendsPageState extends State<TrendsPage> {
             } else if (_selectedPeriod == TrendPeriod.year) {
               xKey = blockTime.month; 
             } else {
-              // All: 按月聚合，Key 为距离 startRange 的月数
-              xKey = (blockTime.year - startRange.year) * 12 + (blockTime.month - startRange.month);
+              // 【修改点】All 模式：xKey 是距离开始日期的天数
+              xKey = blockTime.difference(startRange).inDays;
             }
             
-            spotsMap[xKey] = (spotsMap[xKey] ?? 0) + 5;
+            spotsMap[xKey] = (spotsMap[xKey] ?? 0) + 5; // 如果时间块粒度变了，这里最好用 duration，但暂定5
           }
         }
       });
 
       List<FlSpot> spots = [];
       
-      // 生成点
       int loopMax = (_selectedPeriod == TrendPeriod.week) ? 6 : maxX;
+      // All 模式从 0 开始 (第0天), month/year 从 1 开始 (1号/1月)
       int loopStart = (_selectedPeriod == TrendPeriod.month || _selectedPeriod == TrendPeriod.year) ? 1 : 0;
-      // "all" 模式从 0 开始
-      if (_selectedPeriod == TrendPeriod.all) loopStart = 0;
+      
+      // 如果是 All 模式，loopMax 是总天数，注意边界
+      if (_selectedPeriod == TrendPeriod.all) loopMax = maxX - 1; // index 从 0 到 count-1
 
       for (int i = loopStart; i <= loopMax; i++) {
         double hours = (spotsMap[i] ?? 0) / 60.0;
@@ -410,8 +409,8 @@ class _TrendsPageState extends State<TrendsPage> {
         isCurved: true,
         preventCurveOverShooting: true, 
         color: target.color,
-        // 【修改点】线变细 (3 -> 1)
-        barWidth: 2.0, 
+        // 【修改点】线条变细
+        barWidth: 1.5, 
         isStrokeCapRound: true,
         dotData: FlDotData(show: false),
         belowBarData: BarAreaData(show: false), 
@@ -451,7 +450,7 @@ class _TrendsPageState extends State<TrendsPage> {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 30,
-              // 根据数据量动态调整间隔
+              // 【修改点】传入动态间隔算法
               interval: _calculateXInterval(maxX), 
               getTitlesWidget: (value, meta) => _bottomTitleWidgets(value, meta, startRange),
             ),
@@ -470,7 +469,8 @@ class _TrendsPageState extends State<TrendsPage> {
         ),
         borderData: FlBorderData(show: false),
         minX: (_selectedPeriod == TrendPeriod.month || _selectedPeriod == TrendPeriod.year) ? 1 : 0,
-        maxX: maxX.toDouble(),
+        // All 模式下 maxX 是天数
+        maxX: (_selectedPeriod == TrendPeriod.all) ? maxX.toDouble() - 1 : maxX.toDouble(),
         minY: 0,
         maxY: maxY * 1.1,
         lineBarsData: lineBarsData,
@@ -491,14 +491,14 @@ class _TrendsPageState extends State<TrendsPage> {
     } else if (_selectedPeriod == TrendPeriod.year) {
       text = '$index月';
     } else {
-      // All: 显示 Year-Month
-      // 计算当前 index 对应的月份
-      final currentMonthDate = DateTime(startRange.year, startRange.month + index);
-      // 如果跨年了显示年份，否则只显示月份
-      if (index == 0 || currentMonthDate.month == 1) {
-        text = DateFormat('yy/MM').format(currentMonthDate);
+      // 【修改点】All 模式 - 显示日期 MM/dd
+      final date = startRange.add(Duration(days: index));
+      // 如果间隔很大，显示年份，否则显示月日
+      // 这里简化处理：首尾显示完整，中间显示月日
+      if (index == 0 || date.month == 1 && date.day == 1) {
+        text = DateFormat('yy/MM/dd').format(date);
       } else {
-        text = DateFormat('MM').format(currentMonthDate);
+        text = DateFormat('MM/dd').format(date);
       }
     }
 
@@ -515,14 +515,13 @@ class _TrendsPageState extends State<TrendsPage> {
     return 5;
   }
 
-  // 动态计算X轴标签间隔，防止 "All" 模式下文字重叠
+  // 【修改点】动态计算 X 轴标签间隔，防止文字重叠
   double _calculateXInterval(int maxX) {
     if (_selectedPeriod == TrendPeriod.month) return 5;
     if (_selectedPeriod == TrendPeriod.all) {
-      // 如果月份很多，每隔几个月显示一次
-      if (maxX > 24) return 6; // 半年
-      if (maxX > 12) return 3; // 季度
-      return 1;
+      // 假设屏幕宽度能容纳 6-7 个标签
+      if (maxX <= 7) return 1;
+      return (maxX / 6).floorToDouble();
     }
     return 1;
   }

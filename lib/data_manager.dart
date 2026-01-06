@@ -7,15 +7,13 @@ import 'models/time_entry.dart';
 import 'models/tag.dart';
 
 class DataManager extends ChangeNotifier {
-  // 单例模式
   static final DataManager _instance = DataManager._internal();
   factory DataManager() => _instance;
   DataManager._internal();
 
-  // 核心时间数据：Key=分钟索引, Value=时间条目
+  // 核心时间数据
   final Map<int, TimeEntry> timeData = {};
 
-  // 默认项目列表
   List<Project> projects = [
     Project(id: '1', name: '工作', color: Colors.blue.shade600),
     Project(id: '2', name: '会议', color: Colors.indigo.shade400),
@@ -28,47 +26,40 @@ class DataManager extends ChangeNotifier {
   List<Task> tasks = [];
   List<Tag> tags = [];
 
-  // --- 初始化与保存 ---
+  // 时间块间隔，默认 5
+  int timeBlockDuration = 5;
 
+  // --- 初始化与保存 ---
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 1. 加载 Projects
+    timeBlockDuration = prefs.getInt('timeBlockDuration') ?? 5;
+
     final String? projectsJson = prefs.getString('projects');
     if (projectsJson != null) {
       try {
         final List<dynamic> decoded = jsonDecode(projectsJson);
         projects = decoded.map((e) => Project.fromJson(e)).toList();
-        // 清理可能残留的 'clear' 项目
         projects.removeWhere((p) => p.id == 'clear');
-      } catch (e) {
-        debugPrint("Error loading projects: $e");
-      }
+      } catch (e) { debugPrint("Error projects: $e"); }
     }
 
-    // 2. 加载 Tasks
     final String? tasksJson = prefs.getString('tasks');
     if (tasksJson != null) {
       try {
         final List<dynamic> decoded = jsonDecode(tasksJson);
         tasks = decoded.map((e) => Task.fromJson(e)).toList();
-      } catch (e) {
-        debugPrint("Error loading tasks: $e");
-      }
+      } catch (e) { debugPrint("Error tasks: $e"); }
     }
 
-    // 3. 加载 Tags
     final String? tagsJson = prefs.getString('tags');
     if (tagsJson != null) {
       try {
         final List<dynamic> decoded = jsonDecode(tagsJson);
         tags = decoded.map((e) => Tag.fromJson(e)).toList();
-      } catch (e) {
-        debugPrint("Error loading tags: $e");
-      }
+      } catch (e) { debugPrint("Error tags: $e"); }
     }
 
-    // 4. 加载 TimeData
     final String? timeDataJson = prefs.getString('timeData');
     if (timeDataJson != null) {
       try {
@@ -89,9 +80,7 @@ class DataManager extends ChangeNotifier {
             timeData[index] = TimeEntry(project: project, task: task, tagId: tagId);
           }
         });
-      } catch (e) {
-        debugPrint("Error loading timeData: $e");
-      }
+      } catch (e) { debugPrint("Error timeData: $e"); }
     }
     notifyListeners();
   }
@@ -101,7 +90,8 @@ class DataManager extends ChangeNotifier {
     await prefs.setString('projects', jsonEncode(projects.map((p) => p.toJson()).toList()));
     await prefs.setString('tasks', jsonEncode(tasks.map((t) => t.toJson()).toList()));
     await prefs.setString('tags', jsonEncode(tags.map((t) => t.toJson()).toList()));
-    
+    await prefs.setInt('timeBlockDuration', timeBlockDuration);
+
     final Map<String, dynamic> timeDataMap = {};
     timeData.forEach((key, entry) {
       timeDataMap[key.toString()] = entry.toJson();
@@ -109,7 +99,36 @@ class DataManager extends ChangeNotifier {
     await prefs.setString('timeData', jsonEncode(timeDataMap));
   }
 
-  // --- 时间数据操作 ---
+  // 【核心修改】更新时间块间隔并迁移数据
+  void updateTimeBlockDuration(int newDuration) {
+    if (timeBlockDuration == newDuration) return;
+
+    // 1. 将现有数据“展开”到 1 分钟精度的临时 Map 中
+    // 例如：原间隔5分钟，在 index 0 有数据，则填充 0,1,2,3,4 到 flatMap
+    final Map<int, TimeEntry> flatMap = {};
+    timeData.forEach((startIndex, entry) {
+      for (int i = 0; i < timeBlockDuration; i++) {
+        flatMap[startIndex + i] = entry;
+      }
+    });
+
+    // 2. 清空当前数据
+    timeData.clear();
+
+    // 3. 更新间隔
+    timeBlockDuration = newDuration;
+
+    // 4. 根据新间隔进行“重采样”
+    // 只有当分钟数能被 newDuration 整除时，才写入新数据
+    flatMap.forEach((minuteIndex, entry) {
+      if (minuteIndex % newDuration == 0) {
+        timeData[minuteIndex] = entry;
+      }
+    });
+
+    _save();
+    notifyListeners();
+  }
 
   void batchUpdate(Map<int, TimeEntry?> updates) {
     updates.forEach((index, entry) {
@@ -123,202 +142,99 @@ class DataManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- 项目 (Project) 操作 ---
-
-  void addProject(String name, Color color) {
-    projects.add(Project(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, color: color));
-    _save();
-    notifyListeners();
-  }
-
+  // ... (其余方法保持不变) ...
+  void addProject(String name, Color color) { projects.add(Project(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, color: color)); _save(); notifyListeners(); }
   void updateProject(String id, String newName, Color newColor) {
     final index = projects.indexWhere((p) => p.id == id);
     if (index != -1) {
-      // 1. 更新项目列表
       final newProject = Project(id: id, name: newName, color: newColor);
       projects[index] = newProject;
-
-      // 2. 同步更新时间块中的引用
       timeData.forEach((key, entry) {
         if (entry.project.id == id) {
-          timeData[key] = TimeEntry(
-            project: newProject,
-            task: entry.task,
-            tagId: entry.tagId
-          );
+          timeData[key] = TimeEntry(project: newProject, task: entry.task, tagId: entry.tagId);
         }
       });
-
-      _save();
-      notifyListeners();
+      _save(); notifyListeners();
     }
   }
-
   void removeProject(String id) {
     projects.removeWhere((p) => p.id == id);
     tasks.removeWhere((t) => t.projectId == id);
     timeData.removeWhere((key, value) => value.project.id == id);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
   void reorderProjects(int oldIndex, int newIndex) {
     if (oldIndex < newIndex) newIndex -= 1;
     final Project item = projects.removeAt(oldIndex);
     projects.insert(newIndex, item);
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
-  // 【合并项目】
   void mergeProjects(String sourceId, String targetId) {
     final targetProject = getProjectById(targetId);
     if (targetProject == null) return;
-
-    // 1. 转移 Task
     for (int i = 0; i < tasks.length; i++) {
       if (tasks[i].projectId == sourceId) {
         tasks[i] = Task(id: tasks[i].id, name: tasks[i].name, projectId: targetId);
       }
     }
-
-    // 2. 转移 TimeData
     timeData.forEach((key, entry) {
       if (entry.project.id == sourceId) {
-        timeData[key] = TimeEntry(
-          project: targetProject, 
-          task: entry.task, 
-          tagId: entry.tagId
-        );
+        timeData[key] = TimeEntry(project: targetProject, task: entry.task, tagId: entry.tagId);
       }
     });
-
-    // 3. 删除源项目
     projects.removeWhere((p) => p.id == sourceId);
-    
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
+  Project? getProjectById(String id) { try { return projects.firstWhere((p) => p.id == id); } catch (_) { return null; } }
 
-  Project? getProjectById(String id) {
-    try { return projects.firstWhere((p) => p.id == id); } catch (_) { return null; }
-  }
-
-  // --- 任务 (Task) 操作 ---
-
-  void addTask(String name, String projectId) {
-    tasks.add(Task(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, projectId: projectId));
-    _save();
-    notifyListeners();
-  }
-
+  void addTask(String name, String projectId) { tasks.add(Task(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name, projectId: projectId)); _save(); notifyListeners(); }
   void updateTask(String taskId, String newName, String newProjectId) {
     final index = tasks.indexWhere((t) => t.id == taskId);
     if (index != -1) {
       final newTask = Task(id: taskId, name: newName, projectId: newProjectId);
       tasks[index] = newTask;
-
       final newParentProject = getProjectById(newProjectId);
       if (newParentProject != null) {
-        // 同步更新时间块
         timeData.forEach((key, entry) {
           if (entry.task?.id == taskId) {
-            timeData[key] = TimeEntry(
-              project: newParentProject, 
-              task: newTask, 
-              tagId: entry.tagId
-            );
+            timeData[key] = TimeEntry(project: newParentProject, task: newTask, tagId: entry.tagId);
           }
         });
       }
-      _save();
-      notifyListeners();
+      _save(); notifyListeners();
     }
   }
-
-  void removeTask(String taskId) {
-    tasks.removeWhere((t) => t.id == taskId);
-    // 这里选择不强制清理 timeData，保留历史记录(会降级显示为项目名)
-    _save();
-    notifyListeners();
-  }
-
-  // 【合并任务】
+  void removeTask(String taskId) { tasks.removeWhere((t) => t.id == taskId); _save(); notifyListeners(); }
   void mergeTasks(String sourceTaskId, String targetTaskId) {
     Task? targetTask;
     try { targetTask = tasks.firstWhere((t) => t.id == targetTaskId); } catch (_) {}
     if (targetTask == null) return;
-
     final targetParentProject = getProjectById(targetTask.projectId);
     if (targetParentProject == null) return;
-
-    // 1. 转移 TimeData
     timeData.forEach((key, entry) {
       if (entry.task?.id == sourceTaskId) {
-        timeData[key] = TimeEntry(
-          project: targetParentProject, 
-          task: targetTask, 
-          tagId: entry.tagId
-        );
+        timeData[key] = TimeEntry(project: targetParentProject, task: targetTask, tagId: entry.tagId);
       }
     });
-
-    // 2. 删除源 Task
     tasks.removeWhere((t) => t.id == sourceTaskId);
-
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
+  List<Task> getTasksForProject(String projectId) { return tasks.where((t) => t.projectId == projectId).toList(); }
 
-  List<Task> getTasksForProject(String projectId) {
-    return tasks.where((t) => t.projectId == projectId).toList();
-  }
-
-  // --- 标签 (Tag) 操作 ---
-
-  void addTag(String name) {
-    tags.add(Tag(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name));
-    _save();
-    notifyListeners();
-  }
-
+  void addTag(String name) { tags.add(Tag(id: DateTime.now().millisecondsSinceEpoch.toString(), name: name)); _save(); notifyListeners(); }
   void updateTag(String id, String newName) {
     final index = tags.indexWhere((t) => t.id == id);
-    if (index != -1) {
-      tags[index] = Tag(id: id, name: newName);
-      _save();
-      notifyListeners();
-    }
+    if (index != -1) { tags[index] = Tag(id: id, name: newName); _save(); notifyListeners(); }
   }
-
-  // 【合并标签】
   void mergeTags(String sourceId, String targetId) {
-    // 1. 转移 TimeData
     timeData.forEach((key, entry) {
       if (entry.tagId == sourceId) {
-        timeData[key] = TimeEntry(
-          project: entry.project,
-          task: entry.task,
-          tagId: targetId,
-        );
+        timeData[key] = TimeEntry(project: entry.project, task: entry.task, tagId: targetId);
       }
     });
-
-    // 2. 删除源标签
     tags.removeWhere((t) => t.id == sourceId);
-
-    _save();
-    notifyListeners();
+    _save(); notifyListeners();
   }
-
-  void removeTag(String id) {
-    tags.removeWhere((t) => t.id == id);
-    _save();
-    notifyListeners();
-  }
-  
-  Tag? getTagById(String? id) {
-    if (id == null) return null;
-    try { return tags.firstWhere((t) => t.id == id); } catch (_) { return null; }
-  }
+  void removeTag(String id) { tags.removeWhere((t) => t.id == id); _save(); notifyListeners(); }
+  Tag? getTagById(String? id) { if (id == null) return null; try { return tags.firstWhere((t) => t.id == id); } catch (_) { return null; } }
 }

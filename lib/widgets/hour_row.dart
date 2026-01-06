@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants.dart';
-import '../data_manager.dart'; // 需要引入 DataManager 查找 Tag
+import '../data_manager.dart';
 import '../models/project.dart';
 import '../models/time_entry.dart';
 
@@ -10,6 +10,7 @@ class HourRow extends StatelessWidget {
   final Set<int> selectedMinutes;
   final bool isCurrentHourRow;
   final DateTime now;
+  final int timeBlockDuration; // 【新增】接收间隔
 
   const HourRow({
     super.key,
@@ -18,6 +19,7 @@ class HourRow extends StatelessWidget {
     required this.selectedMinutes,
     required this.isCurrentHourRow,
     required this.now,
+    required this.timeBlockDuration, // 【新增】
   });
 
   String _formatDate(DateTime date) {
@@ -32,13 +34,15 @@ class HourRow extends StatelessWidget {
     final bool isNewDay = currentHour == 0;
     final int rowBaseMinute = hourIndex * 60;
 
+    // 【新增】计算一小时有多少个块
+    final int blocksPerHour = 60 ~/ timeBlockDuration;
+
     return Container(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
         children: [
-          // 左侧：时间标签 (宽度45)
           SizedBox(
             width: 45, 
             child: Center(
@@ -63,18 +67,19 @@ class HourRow extends StatelessWidget {
                     ),
             ),
           ),
-          // 右侧：展示网格
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final double totalWidth = constraints.maxWidth;
-                final double blockWidth = totalWidth / 12;
+                // 【修改】根据块数动态计算宽度
+                final double blockWidth = totalWidth / blocksPerHour;
 
                 return Stack(
                   children: [
                     // 1. 基础网格线
                     Row(
-                      children: List.generate(12, (_) => Container(
+                      // 【修改】使用 blocksPerHour
+                      children: List.generate(blocksPerHour, (_) => Container(
                         width: blockWidth,
                         height: double.infinity,
                         decoration: BoxDecoration(
@@ -82,12 +87,13 @@ class HourRow extends StatelessWidget {
                         ),
                       )),
                     ),
-                    // 2. 颜色项目层 (包含标签显示)
-                    ..._buildMergedProjectBlocks(rowBaseMinute, blockWidth),
+                    // 2. 颜色项目层
+                    ..._buildMergedProjectBlocks(rowBaseMinute, blockWidth, blocksPerHour),
                     // 3. 选中状态层
                     Row(
-                      children: List.generate(12, (i) {
-                        final isSelected = selectedMinutes.contains(rowBaseMinute + i * 5);
+                      children: List.generate(blocksPerHour, (i) {
+                        // 【修改】计算分钟数
+                        final isSelected = selectedMinutes.contains(rowBaseMinute + i * timeBlockDuration);
                         return Container(
                           width: blockWidth,
                           height: double.infinity,
@@ -95,17 +101,12 @@ class HourRow extends StatelessWidget {
                         );
                       }),
                     ),
-                    // 4. 当前时间小竖条 (修复版)
+                    // 4. 当前时间小竖条
                     if (isCurrentHourRow)
                       Builder(
                         builder: (context) {
-                          // 定义竖条宽度
-                          const double barWidth = 3.0; 
-                          
-                          // 计算精确的时间比例 (秒级)
+                          const double barWidth = 2.0; 
                           final double ratio = (now.minute * 60 + now.second) / 3600.0;
-                          
-                          // 【核心修正】减去宽度的一半，实现中心对齐
                           final double leftPos = (ratio * totalWidth) - (barWidth / 2);
 
                           return Positioned(
@@ -116,11 +117,11 @@ class HourRow extends StatelessWidget {
                               child: Container(
                                 width: barWidth,
                                 decoration: BoxDecoration(
-                                  color: Colors.black, // 纯黑
+                                  color: Colors.black,
                                   borderRadius: BorderRadius.circular(1.0),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.white.withOpacity(0.8), // 白色光晕，增强对比
+                                      color: Colors.white.withOpacity(0.8),
                                       blurRadius: 3,
                                       spreadRadius: 1,
                                     )
@@ -141,26 +142,29 @@ class HourRow extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildMergedProjectBlocks(int rowBaseMinute, double blockWidth) {
+  // 【修改】合并逻辑适配动态间隔
+  List<Widget> _buildMergedProjectBlocks(int rowBaseMinute, double blockWidth, int blocksPerHour) {
     List<Widget> blocks = [];
     int i = 0;
-    final DataManager dm = DataManager(); // 用于查找 Tag
+    final DataManager dm = DataManager();
 
-    while (i < 12) {
-      final int currentMinute = rowBaseMinute + (i * 5);
+    while (i < blocksPerHour) {
+      final int currentMinute = rowBaseMinute + (i * timeBlockDuration);
       final TimeEntry? entry = timeData[currentMinute];
+      
       if (entry != null) {
         int j = i + 1;
-        while (j < 12) {
-          final int nextMinute = rowBaseMinute + (j * 5);
+        while (j < blocksPerHour) {
+          final int nextMinute = rowBaseMinute + (j * timeBlockDuration);
           final TimeEntry? nextEntry = timeData[nextMinute];
-          // 合并条件：uniqueId 必须一致 (包含 projectId, taskId, tagId)
-          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) break;
+          
+          if (nextEntry == null || nextEntry.uniqueId != entry.uniqueId) {
+            break; 
+          }
           j++;
         }
-        final int blockCount = j - i;
         
-        // 查找标签对象
+        final int blockCount = j - i;
         final tag = dm.getTagById(entry.tagId);
 
         blocks.add(Positioned(
@@ -168,7 +172,6 @@ class HourRow extends StatelessWidget {
           top: 0, bottom: 0,
           width: blockCount * blockWidth,
           child: Container(
-            // 使用 BoxDecoration 添加右侧白边分割线
             decoration: BoxDecoration(
               color: entry.project.color,
               border: const Border(
@@ -176,13 +179,12 @@ class HourRow extends StatelessWidget {
               ),
             ),
             alignment: Alignment.center,
-            // 使用 Column 显示 项目名 + 标签
-            child: blockCount > 1
+            child: blockCount >= 1 // 原来是>1，现在可能块很大，>=1 也可以显示
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        entry.displayName,
+                        entry.displayName, 
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -192,7 +194,6 @@ class HourRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
-                      // 如果有标签，显示小字
                       if (tag != null)
                         Text(
                           "#${tag.name}",
