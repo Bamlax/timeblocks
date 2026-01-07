@@ -34,7 +34,7 @@ class HourRow extends StatelessWidget {
     final bool isNewDay = currentHour == 0;
     final int rowBaseMinute = hourIndex * 60;
 
-    // 当前设置下的块数 (用于网格和选中状态)
+    // 当前设置下的块数 (用于网格绘制)
     final int blocksPerHour = 60 ~/ timeBlockDuration;
 
     return Container(
@@ -72,10 +72,10 @@ class HourRow extends StatelessWidget {
               builder: (context, constraints) {
                 final double totalWidth = constraints.maxWidth;
                 
-                // 1. 用于【显示内容】的最小单位宽度 (1分钟)
+                // 1. 用于【显示内容和选中】的最小单位宽度 (1分钟)
                 final double oneMinuteWidth = totalWidth / 60.0;
                 
-                // 2. 用于【网格和选中】的块宽度 (当前间隔)
+                // 2. 用于【网格】的块宽度 (当前间隔)
                 final double blockWidth = totalWidth / blocksPerHour;
 
                 return Stack(
@@ -91,22 +91,11 @@ class HourRow extends StatelessWidget {
                       )),
                     ),
                     
-                    // Layer 2: 颜色项目层 (核心修改：始终按 1分钟 精度渲染)
-                    // 这样即使在大间隔视图下，也能精确看到小块数据
+                    // Layer 2: 颜色项目层 (始终按 1分钟 精度渲染)
                     ..._buildHighFidelityBlocks(rowBaseMinute, oneMinuteWidth),
                     
-                    // Layer 3: 选中状态层 (遵循 timeBlockDuration，反馈用户操作范围)
-                    Row(
-                      children: List.generate(blocksPerHour, (i) {
-                        final startMinute = rowBaseMinute + i * timeBlockDuration;
-                        final isSelected = selectedMinutes.contains(startMinute);
-                        return Container(
-                          width: blockWidth,
-                          height: double.infinity,
-                          color: isSelected ? Colors.black.withOpacity(0.15) : Colors.transparent,
-                        );
-                      }),
-                    ),
+                    // Layer 3: 选中状态层 (【核心修改】按 1分钟 精度渲染)
+                    ..._buildSelectionLayer(rowBaseMinute, oneMinuteWidth),
                     
                     // Layer 4: 当前时间线
                     if (isCurrentHourRow)
@@ -149,7 +138,7 @@ class HourRow extends StatelessWidget {
     );
   }
 
-  // 【核心修改】高保真渲染：基于1分钟精度合并
+  // 高保真渲染项目块
   List<Widget> _buildHighFidelityBlocks(int rowBaseMinute, double oneMinuteWidth) {
     List<Widget> blocks = [];
     int i = 0;
@@ -161,7 +150,6 @@ class HourRow extends StatelessWidget {
       
       if (entry != null) {
         int j = i + 1;
-        // 寻找连续的、相同的1分钟块
         while (j < 60) {
           final int nextMinute = rowBaseMinute + j;
           final TimeEntry? nextEntry = timeData[nextMinute];
@@ -182,14 +170,12 @@ class HourRow extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               color: entry.project.color,
-              // 分割线：只有当这块结束的地方不是 60 分时，才画右白线
+              // 分割线
               border: (j < 60) ? const Border(
                 right: BorderSide(color: Colors.white, width: 1.0),
               ) : null,
             ),
             alignment: Alignment.center,
-            // 只有宽度足够时才显示文字 (例如大于2分钟宽度)
-            // 你可以根据实际效果调整这个阈值，或者使用 FittedBox
             child: durationInMinutes >= 2 
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -199,7 +185,7 @@ class HourRow extends StatelessWidget {
                           entry.displayName, 
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 10, // 字体稍微调小以适应精细块
+                            fontSize: 10, 
                             fontWeight: FontWeight.bold,
                             shadows: [Shadow(blurRadius: 2, color: Colors.black26, offset: Offset(0, 1))]
                           ),
@@ -223,6 +209,35 @@ class HourRow extends StatelessWidget {
                     ],
                   )
                 : null,
+          ),
+        ));
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    return blocks;
+  }
+
+  // 【新增】高保真选中层渲染
+  List<Widget> _buildSelectionLayer(int rowBaseMinute, double oneMinuteWidth) {
+    List<Widget> blocks = [];
+    int i = 0;
+    while (i < 60) {
+      final int currentMinute = rowBaseMinute + i;
+      if (selectedMinutes.contains(currentMinute)) {
+        // 找到连续选中的区域
+        int j = i + 1;
+        while (j < 60 && selectedMinutes.contains(rowBaseMinute + j)) {
+          j++;
+        }
+        
+        blocks.add(Positioned(
+          left: i * oneMinuteWidth,
+          top: 0, bottom: 0,
+          width: (j - i) * oneMinuteWidth,
+          child: Container(
+            color: Colors.black.withOpacity(0.15),
           ),
         ));
         i = j;

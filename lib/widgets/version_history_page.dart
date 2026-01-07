@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../version_data.dart'; // 引入数据文件
+import '../version_data.dart';
 
 class VersionHistoryPage extends StatelessWidget {
   const VersionHistoryPage({super.key});
@@ -16,7 +16,13 @@ class VersionHistoryPage extends StatelessWidget {
         itemCount: appVersionHistory.length,
         itemBuilder: (context, index) {
           final record = appVersionHistory[index];
-          return _VersionItem(record: record);
+          // 【核心修改】如果是列表第一个 (index 0)，就是最新版
+          final bool isLatest = (index == 0);
+          
+          return _VersionItem(
+            record: record, 
+            isLatest: isLatest,
+          );
         },
       ),
     );
@@ -25,8 +31,12 @@ class VersionHistoryPage extends StatelessWidget {
 
 class _VersionItem extends StatelessWidget {
   final VersionRecord record;
+  final bool isLatest; // 从外部传入
 
-  const _VersionItem({required this.record});
+  const _VersionItem({
+    required this.record, 
+    required this.isLatest,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +50,8 @@ class _VersionItem extends StatelessWidget {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(width: 8),
-            if (record.isLatest)
+            // 如果是最新版，显示标签
+            if (isLatest)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(

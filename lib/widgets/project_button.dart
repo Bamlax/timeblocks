@@ -19,10 +19,17 @@ class ProjectButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isClear = project.id == 'clear';
     
+    // 加深 50%
+    final Color displayColor = isClear 
+        ? Colors.white 
+        : (isTracking 
+            ? Color.lerp(project.color, Colors.black, 0.5)! 
+            : project.color);
+
     return Material(
-      color: isClear ? Colors.white : project.color,
+      color: displayColor,
       borderRadius: BorderRadius.circular(6),
-      elevation: isClear ? 0 : 1,
+      elevation: isTracking ? 4 : (isClear ? 0 : 1),
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
@@ -33,29 +40,19 @@ class ProjectButton extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
-            border: isClear ? Border.all(color: Colors.grey.shade300) : null,
+            // 追踪时加白框，普通时无框(除非是clear)
+            border: isTracking 
+                ? Border.all(color: Colors.white, width: 2)
+                : (isClear ? Border.all(color: Colors.grey.shade300) : null),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // 【修复】静态圆点 (只要 isTracking 为 true 就显示)
-              if (isTracking) 
-                const Padding(
-                  padding: EdgeInsets.only(right: 6),
-                  child: Icon(Icons.fiber_manual_record, size: 10, color: Colors.white),
-                ),
-              Flexible(
-                child: Text(
-                  project.name,
-                  style: TextStyle(
-                    color: isClear ? Colors.grey.shade700 : Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+          child: Text(
+            project.name,
+            style: TextStyle(
+              color: isClear ? Colors.grey.shade700 : Colors.white,
+              fontSize: 12,
+              fontWeight: isTracking ? FontWeight.w900 : FontWeight.w600,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ),
@@ -63,11 +60,10 @@ class ProjectButton extends StatelessWidget {
   }
 }
 
+// AddProjectButton 保持不变
 class AddProjectButton extends StatelessWidget {
   final VoidCallback onTap;
-
   const AddProjectButton({super.key, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     return Material(
