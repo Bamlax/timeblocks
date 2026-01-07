@@ -17,6 +17,13 @@ class VersionRecord {
 // UI 会自动将第一个识别为 "Latest"
 
 const List<VersionRecord> appVersionHistory = [
+    VersionRecord(
+    version: '0.8.1',
+    date: '2026-1-7',
+    updates: [
+      '修复趋势界面的错误统计时长',
+    ],
+  ),
   VersionRecord(
     version: '0.8.0',
     date: '2026-1-7',
