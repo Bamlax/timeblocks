@@ -94,7 +94,6 @@ class _HomePageState extends State<HomePage> {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {}); 
-        // 这里的自动填充交给了 DataManager 内部逻辑，UI 只负责刷新显示
         _dataManager.checkAndFillCurrentMinute();
       }
     });
@@ -129,6 +128,29 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // --- 切换选取模式 ---
+  void _toggleSelectionMode() {
+    setState(() {
+      if (_selectionMode == SelectionMode.block) {
+        _selectionMode = SelectionMode.event;
+      } else {
+        _selectionMode = SelectionMode.block;
+      }
+      _clearSelection(); // 切换模式时清空选区，防止逻辑冲突
+    });
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("当前模式：${_selectionMode == SelectionMode.block ? '按时间块' : '按事件'}选取"),
+        duration: const Duration(milliseconds: 800),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 80, left: 20, right: 20), // 避开底部操作栏
+      ),
+    );
+  }
+
+  // --- 坐标计算 ---
   int? _calculateMinuteFromOffset(Offset localPosition) {
     final RenderBox? renderBox = _listViewKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return null;
@@ -237,6 +259,7 @@ class _HomePageState extends State<HomePage> {
       _dragStartIndex = null;
     });
 
+    // 1. 如果点击了具体的事件
     if (clickedEntry != null) {
       final String targetUniqueId = clickedEntry.uniqueId;
       
@@ -263,6 +286,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    // 2. 如果点击了空白
     final keys = _dataManager.timeData.keys.toList()..sort();
     if (keys.isEmpty) return;
 
@@ -398,7 +422,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _applyEntry(Project? project, [Task? task]) {
-    // 1. 批量填充模式
     if (_selectedMinutes.isNotEmpty) {
       _recordUndoSnapshot();
       Map<int, TimeEntry?> updates = {};
@@ -420,28 +443,23 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // 2. 实时追踪模式
     if (project != null) {
       final newEntry = TimeEntry(project: project, task: task);
-      
-      // 判断是否已经在这个状态
-      final activeEntry = _dataManager.activeTrackingEntry;
-      if (activeEntry?.uniqueId == newEntry.uniqueId) {
-        // 停止追踪
-        _dataManager.stopTracking();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已停止自动填充"), duration: Duration(seconds: 1)));
-      } else {
-        // 开始追踪
-        _dataManager.startTracking(newEntry);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("开始自动填充: ${newEntry.displayName}"), 
-            duration: const Duration(seconds: 1),
-            backgroundColor: project.color,
-          )
-        );
-      }
-      // UI 会通过 ListenableBuilder 自动更新，因为 DataManager 通知了 Listeners
+      setState(() {
+        if (_dataManager.activeTrackingEntry?.uniqueId == newEntry.uniqueId) {
+          _dataManager.stopTracking(); 
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已停止自动填充"), duration: Duration(seconds: 1)));
+        } else {
+          _dataManager.startTracking(newEntry); 
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("开始自动填充: ${newEntry.displayName}"), 
+              duration: const Duration(seconds: 1),
+              backgroundColor: project.color,
+            )
+          );
+        }
+      });
     }
   }
 
@@ -565,56 +583,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _showSelectionModeDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("选择选取方式"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text("按时间块"),
-              subtitle: const Text("手动点击或拖拽选择"),
-              leading: Radio<SelectionMode>(
-                value: SelectionMode.block,
-                groupValue: _selectionMode,
-                onChanged: (val) {
-                  setState(() => _selectionMode = val!);
-                  _clearSelection();
-                  Navigator.pop(ctx);
-                },
-              ),
-              onTap: () {
-                setState(() => _selectionMode = SelectionMode.block);
-                _clearSelection();
-                Navigator.pop(ctx);
-              },
-            ),
-            ListTile(
-              title: const Text("按事件"),
-              subtitle: const Text("智能选中连续的相同事件"),
-              leading: Radio<SelectionMode>(
-                value: SelectionMode.event,
-                groupValue: _selectionMode,
-                onChanged: (val) {
-                  setState(() => _selectionMode = val!);
-                  _clearSelection();
-                  Navigator.pop(ctx);
-                },
-              ),
-              onTap: () {
-                setState(() => _selectionMode = SelectionMode.event);
-                _clearSelection();
-                Navigator.pop(ctx);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showBlockSizeDialog() {
     showModalBottomSheet(
       context: context,
@@ -648,7 +616,8 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final DateTime now = DateTime.now();
     final bool hasSelection = _selectedMinutes.isNotEmpty;
-    // 【核心修复】直接从 DataManager 获取，不使用本地 State 变量
+
+    // 从 DataManager 获取 activeEntry
     final activeEntry = _dataManager.activeTrackingEntry;
 
     return Scaffold(
@@ -663,12 +632,25 @@ class _HomePageState extends State<HomePage> {
             _scaffoldKey.currentState?.openDrawer();
           },
         ),
+        // 【核心修改】点击标题切换模式，长按回今天
         title: GestureDetector(
           onTap: () {
             _dismissUndo();
-            _scrollToToday();
+            _toggleSelectionMode(); // 短按切换
           },
-          child: const Text('Timeblocks'),
+          onLongPress: () {
+            _dismissUndo();
+            _scrollToToday(); // 长按回今天
+          },
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Timeblocks'),
+              SizedBox(width: 4),
+              // 提示图标：切换
+              Icon(Icons.swap_vert, size: 18, color: Colors.grey),
+            ],
+          ),
         ),
         centerTitle: true,
         actions: [
@@ -689,21 +671,10 @@ class _HomePageState extends State<HomePage> {
               _dismissUndo();
               if (value == 'block_size') {
                 _showBlockSizeDialog();
-              } else if (value == 'selection_mode') {
-                _showSelectionModeDialog();
               }
+              // 移除了 SelectionMode 菜单，因为改到了 Title
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'selection_mode',
-                child: Row(
-                  children: [
-                    Icon(Icons.select_all, size: 20, color: Colors.grey),
-                    SizedBox(width: 8),
-                    Text('选取方式'),
-                  ],
-                ),
-              ),
               const PopupMenuItem(
                 value: 'block_size',
                 child: Row(
@@ -719,7 +690,8 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(width: 8),
         ],
         flexibleSpace: GestureDetector(
-          onTap: () {
+          // 背景也支持点击回到今天(保留旧习惯)或者忽略，这里保留长按回今天比较好
+          onLongPress: () {
             _dismissUndo();
             _scrollToToday();
           },
@@ -804,7 +776,6 @@ class _HomePageState extends State<HomePage> {
                           final subTasks = _dataManager.getTasksForProject(project.id);
                           final String projectUniqueId = "${project.id}_root_${null}";
 
-                          // 【核心修改】isTracking 判断逻辑
                           final bool isProjectTracking = activeEntry?.uniqueId == projectUniqueId;
 
                           if (subTasks.isEmpty) {
@@ -843,7 +814,6 @@ class _HomePageState extends State<HomePage> {
                               ),
                               ...subTasks.map((task) {
                                 final String taskUniqueId = "${project.id}_${task.id}_${null}";
-                                // 【核心修改】子任务 isTracking 判断
                                 final bool isTaskTracking = activeEntry?.uniqueId == taskUniqueId;
                                 return Padding(
                                   padding: const EdgeInsets.only(left: 12, right: 4, top: 4),
@@ -983,14 +953,10 @@ class _SubTaskButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color displayColor = isTracking 
-        ? Color.lerp(parentProject.color, Colors.black, 0.3)! 
-        : parentProject.color;
-
     return Material(
-      color: displayColor,
+      color: parentProject.color,
       borderRadius: BorderRadius.circular(4),
-      elevation: isTracking ? 3 : 1, 
+      elevation: 1, 
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(4),
@@ -1004,15 +970,20 @@ class _SubTaskButton extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              if (isTracking) 
+                const Padding(
+                  padding: EdgeInsets.only(right: 2), 
+                  child: Icon(Icons.fiber_manual_record, size: 8, color: Colors.white),
+                ),
               const Icon(Icons.subdirectory_arrow_right, size: 12, color: Colors.white70),
               const SizedBox(width: 2),
               Flexible(
                 child: Text(
                   task.name,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
-                    fontWeight: isTracking ? FontWeight.bold : FontWeight.w600,
+                    fontWeight: FontWeight.w600,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
